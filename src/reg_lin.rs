@@ -1,3 +1,7 @@
+use std::ops::Mul;
+
+use nalgebra::allocator::Allocator;
+use nalgebra::{ComplexField, DefaultAllocator, Dim, DimMin, DimMinimum, Matrix, Storage, Vector};
 use ndarray::Array;
 use plotters::prelude::*;
 
@@ -5,9 +9,34 @@ use rand::distributions::Standard;
 use rand::prelude::*;
 use rand::rngs::OsRng;
 
-pub fn regression() {}
+pub fn normal_equations<
+    T: ComplexField,
+    N: DimMin<M>,
+    M: Dim,
+    S: Storage<T, N, M> + Storage<T, N>,
+>(
+    features: Matrix<T, N, M, S>,
+    y: Vector<T, N, S>,
+) -> Option<Vector<T, M, <DefaultAllocator as Allocator<T, M>>::Buffer>>
+where
+    DefaultAllocator: Allocator<T, N, M>
+        + Allocator<T, M, N>
+        + Allocator<T, M, M>
+        + Allocator<T, M>
+        + Allocator<(usize, usize), DimMinimum<N, M>>,
+    S: Clone,
+{
+    let x = features
+        .transpose()
+        .mul(features.clone())
+        .try_inverse()?
+        .mul(features.transpose())
+        .mul(y);
 
-pub fn run<B>(mut line_plot: ChartBuilder<B>, mut error_histogram_plot: ChartBuilder<B>)
+    Some(x)
+}
+
+pub fn plot<B>(mut line_plot: ChartBuilder<B>, mut error_histogram_plot: ChartBuilder<B>)
 where
     B: DrawingBackend,
 {
