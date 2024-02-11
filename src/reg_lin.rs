@@ -10,18 +10,19 @@ use rand::distributions::Standard;
 use rand::prelude::*;
 use rand::rngs::OsRng;
 
-use dfdx::nn::modules::Linear;
+use dfdx::tensor_ops::matmul;
+use dfdx::tensor_ops::TryMatMul;
 
-pub fn stochastic_gradient_descent<
-    T: nalgebra::ComplexField,
-    N: nalgebra::DimMin<M>,
-    M: nalgebra::Dim,
-    S: nalgebra::Storage<T, N, M> + nalgebra::Storage<T, N>,
->(
-    features: nalgebra::Matrix<T, N, M, S>,
-) -> () {
-    let dev = AutoDevice::default();
-
+pub fn stochastic_gradient_descent<T, S1, S2, Tape, Dev>(
+    features: dfdx::tensor::Tensor<S1, T, Dev, Tape>,
+    y: dfdx::tensor::Tensor<S2, T, Dev, Tape>,
+) -> u32
+where
+    Dev: dfdx::tensor::Storage<T>,
+    Tape: dfdx::tensor::Tape<T, Dev>,
+    S1: dfdx::shapes::Shape,
+    S2: dfdx::shapes::Shape,
+{
     todo!()
 }
 
