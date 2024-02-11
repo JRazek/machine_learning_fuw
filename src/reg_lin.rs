@@ -1,29 +1,51 @@
 use std::ops::Mul;
 
+use dfdx::tensor::AutoDevice;
 use nalgebra::allocator::Allocator;
 use nalgebra::{ComplexField, DefaultAllocator, Dim, DimMin, DimMinimum, Matrix, Storage, Vector};
-use ndarray::Array;
+use ndarray::{Array, Dimension};
 use plotters::prelude::*;
 
 use rand::distributions::Standard;
 use rand::prelude::*;
 use rand::rngs::OsRng;
 
-pub fn normal_equations<
-    T: ComplexField,
-    N: DimMin<M>,
-    M: Dim,
-    S: Storage<T, N, M> + Storage<T, N>,
+use dfdx::nn::modules::Linear;
+
+pub fn stochastic_gradient_descent<
+    T: nalgebra::ComplexField,
+    N: nalgebra::DimMin<M>,
+    M: nalgebra::Dim,
+    S: nalgebra::Storage<T, N, M> + nalgebra::Storage<T, N>,
 >(
-    features: Matrix<T, N, M, S>,
-    y: Vector<T, N, S>,
-) -> Option<Vector<T, M, <DefaultAllocator as Allocator<T, M>>::Buffer>>
+    features: nalgebra::Matrix<T, N, M, S>,
+) -> () {
+    let dev = AutoDevice::default();
+
+    todo!()
+}
+
+pub fn normal_equations<
+    T: nalgebra::ComplexField,
+    N: nalgebra::DimMin<M>,
+    M: nalgebra::Dim,
+    S: nalgebra::Storage<T, N, M> + nalgebra::Storage<T, N>,
+>(
+    features: nalgebra::Matrix<T, N, M, S>,
+    y: nalgebra::Vector<T, N, S>,
+) -> Option<
+    nalgebra::Vector<
+        T,
+        M,
+        <nalgebra::DefaultAllocator as nalgebra::allocator::Allocator<T, M>>::Buffer,
+    >,
+>
 where
-    DefaultAllocator: Allocator<T, N, M>
+    nalgebra::DefaultAllocator: Allocator<T, N, M>
         + Allocator<T, M, N>
         + Allocator<T, M, M>
         + Allocator<T, M>
-        + Allocator<(usize, usize), DimMinimum<N, M>>,
+        + Allocator<(usize, usize), nalgebra::DimMinimum<N, M>>,
     S: Clone,
 {
     let x = features
