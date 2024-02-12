@@ -1,3 +1,4 @@
+mod log_reg;
 mod reg_lin;
 
 use plotters::prelude::*;
@@ -11,7 +12,9 @@ use dfdx::nn::LinearConstConfig;
 
 use dfdx::nn::BuildModuleExt;
 
-fn main() {
+use std::fs;
+
+fn reg_lin() {
     let drawing_area = SVGBackend::new("./lin_reg.svg", (800, 600)).into_drawing_area();
 
     let (left, right) = drawing_area.split_horizontally(400);
@@ -29,4 +32,8 @@ fn main() {
     };
 
     stochastic_gradient_descent();
+}
+
+fn main() {
+    log_reg::log_reg();
 }
