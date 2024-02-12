@@ -3,10 +3,8 @@ name = "uczenie_maszynowe_fuw"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-dfdx = "0.13.0"
+dfdx = { git = "https://github.com/coreylowman/dfdx.git" }
 plotters = "0.3.5"
 rand = "0.8.5"
 ndarray = { version = "0.15.6", features = ["blas"] }

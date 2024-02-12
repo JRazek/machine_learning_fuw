@@ -10,20 +10,63 @@ use rand::distributions::Standard;
 use rand::prelude::*;
 use rand::rngs::OsRng;
 
-use dfdx::tensor_ops::matmul;
-use dfdx::tensor_ops::TryMatMul;
+use nalgebra::Vector4;
 
-pub fn stochastic_gradient_descent<T, S1, S2, Tape, Dev>(
-    features: dfdx::tensor::Tensor<S1, T, Dev, Tape>,
-    y: dfdx::tensor::Tensor<S2, T, Dev, Tape>,
-) -> u32
-where
-    Dev: dfdx::tensor::Storage<T>,
-    Tape: dfdx::tensor::Tape<T, Dev>,
-    S1: dfdx::shapes::Shape,
-    S2: dfdx::shapes::Shape,
-{
-    todo!()
+use dfdx::tensor::TensorFrom;
+
+use dfdx::nn::LinearConstConfig;
+
+use dfdx::nn::BuildModuleExt;
+use dfdx::nn::Module;
+use dfdx::nn::Sgd;
+use dfdx::nn::ZeroGrads;
+use dfdx::prelude::*;
+use dfdx::tensor::Trace;
+
+pub fn stochastic_gradient_descent() {
+    let dev = dfdx::tensor::AutoDevice::default();
+
+    let model = LinearConstConfig::<1, 1>::default();
+
+    let mut module = dev.build_module::<f32>(model);
+
+    let current_model = [0., 1., 2., 3.];
+    let voltage_model = [0., 2., 4., 6.];
+
+    let mut grads = module.alloc_grads();
+
+    let mut sgd = Sgd::new(
+        &module,
+        SgdConfig {
+            lr: 0.01,
+            momentum: None,
+            weight_decay: None,
+        },
+    );
+
+    for _ in 0..100 {
+        voltage_model
+            .into_iter()
+            .zip(current_model)
+            .for_each(|(u, i)| {
+                let i_tensor = dev.tensor([i]);
+
+                let u_predicted = module.forward(i_tensor.traced(grads.clone()));
+                let loss = (u_predicted - u).square().mean();
+
+                grads = loss.backward();
+
+                sgd.update(&mut module, &grads).unwrap();
+
+                module.zero_grads(&mut grads)
+            });
+    }
+
+    println!(
+        "R: {}, bias: {}",
+        module.weight.data().unwrap().get(0).unwrap(),
+        module.bias.data().unwrap().get(0).unwrap()
+    );
 }
 
 pub fn normal_equations<
