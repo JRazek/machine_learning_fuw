@@ -86,19 +86,23 @@ fn show_by_records<'a, DB, MI, BI>(
 fn visualize<'a>(records: impl Iterator<Item = &'a Record> + Clone) {
     let backend = SVGBackend::new("plots/log_reg_data_plot.svg", (1200, 800)).into_drawing_area();
 
-    let math_records = records.clone().map(|r| r.math);
-    let biology_records = records.clone().map(|r| r.biology);
-    let passed = records.clone().filter(|r| r.pass).count() as u32;
+    if let [lower_area, center_area, upper_area, ..] = backend.split_evenly((3, 1)).as_slice() {
+        let math_records = records.clone().map(|r| r.math);
+        let biology_records = records.clone().map(|r| r.biology);
+        let passed = records.clone().filter(|r| r.pass).count() as u32;
 
-    let (lower_area, upper_area) = backend.split_vertically(400);
+        show_by_records(
+            math_records,
+            biology_records,
+            passed,
+            records.clone().count() as u32 - passed,
+            &lower_area,
+        );
 
-    show_by_records(
-        math_records,
-        biology_records,
-        passed,
-        records.count() as u32 - passed,
-        &lower_area,
-    );
+        let passed_records_filtered = records.clone().filter(|r| r.pass);
+    } else {
+        panic!("Expected 3 areas");
+    }
 
     backend.present().unwrap();
 }
