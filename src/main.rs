@@ -6,13 +6,6 @@ use plotters::prelude::*;
 use nalgebra::Vector4;
 use reg_lin::{normal_equations, stochastic_gradient_descent};
 
-use dfdx::tensor::TensorFrom;
-
-use dfdx::nn::LinearConstConfig;
-
-use dfdx::nn::BuildModuleExt;
-
-use std::fs;
 
 fn reg_lin() {
     let drawing_area = SVGBackend::new("./lin_reg.svg", (800, 600)).into_drawing_area();
