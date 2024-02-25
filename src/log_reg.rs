@@ -107,6 +107,44 @@ fn visualize<'a>(records: impl Iterator<Item = &'a Record> + Clone) {
     backend.present().unwrap();
 }
 
+use dfdx::shapes::Const;
+use dfdx::shapes::ConstShape;
+use dfdx::shapes::HasShape;
+use dfdx::shapes::Rank1;
+use dfdx::shapes::Rank2;
+use dfdx::tensor::AutoDevice;
+use dfdx::tensor::Storage;
+use dfdx::tensor::Tensor;
+use dfdx::tensor::TensorFrom;
+use dfdx::tensor_ops::Device;
+use dfdx::tensor_ops::ReshapeTo;
+use dfdx::tensor_ops::TryMatMul;
+
+struct LogisticRegression<const N: usize, St: Storage<f32>> {
+    theta: Tensor<(Const<N>,), f32, St>,
+}
+
+use std::fmt::Debug;
+
+impl<const N: usize, St: Device<f32>> LogisticRegression<N, St>
+where
+    Tensor<Rank1<N>, f32, St>: TryMatMul<Tensor<Rank1<N>, f32, St>>,
+    <Tensor<Rank1<N>, f32, St> as TryMatMul<Tensor<Rank1<N>, f32, St>>>::Output: Debug,
+    <Tensor<(dfdx::prelude::Const<N>,), f32, St> as HasShape>::Shape: ConstShape,
+{
+    pub fn inference(self, mut x: Tensor<Rank1<N>, f32, St>) -> f32 {
+        let dev = AutoDevice::default();
+
+        let x: Tensor<Rank2<1, N>, f32, _> = x.reshape();
+
+        let arg: f32 = -x.matmul(self.theta).as_vec()[0];
+
+        let res = 1. / (1. + arg.exp());
+
+        res
+    }
+}
+
 pub fn log_reg() {
     let mut records: Vec<Record> = csv::Reader::from_path("data/reg_log_data.txt")
         .unwrap()
@@ -115,4 +153,14 @@ pub fn log_reg() {
         .collect();
 
     visualize(records.iter());
+
+    let dev = AutoDevice::default();
+
+    let log_reg = LogisticRegression {
+        theta: dev.tensor([1., 2.]),
+    };
+
+    let x = dev.tensor([1., 0.5]);
+
+    log_reg.inference(x);
 }
