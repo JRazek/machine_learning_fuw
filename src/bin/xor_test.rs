@@ -57,3 +57,7 @@ pub fn log_reg() {
         sgd.update(&mut reg, &grads).unwrap();
     }
 }
+
+fn main() {
+    log_reg();
+}

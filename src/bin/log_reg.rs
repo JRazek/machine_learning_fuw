@@ -1,3 +1,6 @@
+#![feature(array_chunks)]
+#![feature(iter_array_chunks)]
+
 use dfdx::data::Collate;
 use serde::de::{self, Deserialize, Deserializer, Unexpected};
 
@@ -187,4 +190,8 @@ pub fn log_reg() {
 
         reg.zero_grads(&mut grads);
     }
+}
+
+fn main() {
+    log_reg()
 }

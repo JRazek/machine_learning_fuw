@@ -194,3 +194,23 @@ where
         .draw()
         .unwrap();
 }
+
+fn main() {
+    let drawing_area = SVGBackend::new("./lin_reg.svg", (800, 600)).into_drawing_area();
+
+    let (left, right) = drawing_area.split_horizontally(400);
+
+    plot(ChartBuilder::on(&left), ChartBuilder::on(&right));
+
+    drawing_area.present().unwrap();
+
+    {
+        let currents = Vector4::new(0., 1., 2., 3.);
+        let voltage = Vector4::new(0.1, 2.1, 4.3, 6.4);
+
+        let r = normal_equations(currents, voltage).unwrap();
+        println!("fitted R: {r}");
+    };
+
+    stochastic_gradient_descent();
+}
