@@ -1,11 +1,15 @@
+#![feature(array_chunks)]
+#![feature(iter_array_chunks)]
+
 mod log_reg;
 mod reg_lin;
+
+mod xor_test;
 
 use plotters::prelude::*;
 
 use nalgebra::Vector4;
 use reg_lin::{normal_equations, stochastic_gradient_descent};
-
 
 fn reg_lin() {
     let drawing_area = SVGBackend::new("./lin_reg.svg", (800, 600)).into_drawing_area();

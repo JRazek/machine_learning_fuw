@@ -1,8 +1,9 @@
+use dfdx::data::Collate;
 use serde::de::{self, Deserialize, Deserializer, Unexpected};
 
 use plotters::prelude::*;
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, serde::Deserialize)]
 struct Record {
     math: f32,
     biology: f32,
@@ -114,13 +115,15 @@ use dfdx::tensor::AutoDevice;
 use dfdx::prelude::*;
 
 #[derive(Clone, Sequential, Default)]
-struct LogisticRegression<const N: usize, const M: usize> {
-    linear: LinearConstConfig<N, M>,
+struct LogisticRegression {
+    linear: LinearConstConfig<2, 3>,
     activation: Sigmoid,
+    linear2: LinearConstConfig<3, 1>,
+    activation2: Sigmoid,
 }
 
 pub fn log_reg() {
-    let mut records: Vec<Record> = csv::Reader::from_path("data/reg_log_data.txt")
+    let records: Vec<Record> = csv::Reader::from_path("data/reg_log_data.txt")
         .unwrap()
         .deserialize()
         .map(|res| res.unwrap())
@@ -130,11 +133,58 @@ pub fn log_reg() {
 
     let dev = AutoDevice::default();
 
-    let reg = dev.build_module::<f32>(LogisticRegression::<4, 10>::default());
+    let mut reg = dev.build_module::<f32>(LogisticRegression::default());
 
-    let input: Tensor<Rank2<10, 4>, f32, Cpu> = dev.sample_normal();
+    let mut sgd = Sgd::new(
+        &reg,
+        SgdConfig {
+            lr: 1e-1,
+            momentum: None,
+            weight_decay: None,
+        },
+    );
 
-    let res = reg.forward(input);
+    let mut grads = reg.alloc_grads();
 
-    println!("{:?}", res);
+    //will skip last records.len() - (records.len() % 10) elements
+
+    const BATCH_SIZE: usize = 1;
+
+    for batch in records
+        .repeat(1000)
+        .into_iter()
+        .array_chunks::<BATCH_SIZE>()
+    {
+        let batch_input: Vec<_> = batch
+            .iter()
+            .map(|&Record { math, biology, .. }| [0.01 * math, 0.01 * biology])
+            .flatten()
+            .collect();
+
+        let batch_expected: [f32; BATCH_SIZE] = batch.map(|Record { pass, .. }| pass as u32 as f32);
+
+        let input_tensor: Tensor<Rank2<BATCH_SIZE, 2>, f32, _, _> =
+            dev.tensor_from_vec(batch_input, Rank2::<BATCH_SIZE, 2>::default());
+
+        let prediction: Tensor<Rank1<BATCH_SIZE>, f32, Cpu, _> =
+            reg.forward_mut(input_tensor.trace(grads)).reshape();
+
+        let expected_tensor: Tensor<Rank1<BATCH_SIZE>, f32, _, _> = dev.tensor(batch_expected);
+
+        println!(
+            "prediction: {:?}, expected: {:?}",
+            prediction.array(),
+            expected_tensor.array()
+        );
+
+        let loss = mse_loss(prediction, expected_tensor);
+        println!("current loss: {:?}", loss.array());
+
+        grads = loss.backward();
+        //        println!("grads: {:?}", grads);
+
+        sgd.update(&mut reg, &grads).unwrap();
+
+        reg.zero_grads(&mut grads);
+    }
 }
