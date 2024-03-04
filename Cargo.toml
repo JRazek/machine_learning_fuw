@@ -14,7 +14,7 @@ name = "xor_test"
 
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git" }
-plotters = "0.3.5"
+plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "errorbar", "line_series", "histogram", "point_series"] }
 rand = "0.8.5"
 ndarray = { version = "0.15.6", features = ["blas"] }
 nalgebra = "0.32.3"
