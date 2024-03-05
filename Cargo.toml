@@ -12,6 +12,12 @@ name = "reg_lin"
 [[bin]]
 name = "xor_test"
 
+[[bin]]
+name = "convolutions"
+
+[[bin]]
+name = "plotting"
+
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git" }
 plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "errorbar", "line_series", "histogram", "point_series"] }
