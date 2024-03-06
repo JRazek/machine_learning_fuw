@@ -13,10 +13,10 @@ name = "reg_lin"
 name = "xor_test"
 
 [[bin]]
-name = "convolutions"
+name = "plotting"
 
 [[bin]]
-name = "plotting"
+name = "quadratic_eq"
 
 [[bin]]
 name = "tensors"
