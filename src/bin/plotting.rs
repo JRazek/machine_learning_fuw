@@ -1,4 +1,8 @@
 use dfdx::prelude::*;
+use plotters::drawing::IntoDrawingArea;
+use plotters::series::Histogram;
+
+use plotters::backend::SVGBackend;
 
 use std::time::Instant;
 
@@ -47,8 +51,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("elapsed: {:?}", bench_variance);
 
-    //calculate gaussian with CLT
-    let uniform: Tensor<Rank1<100>, f32, _> = dev.sample_uniform();
+    let normal_dist: Tensor<Rank1<100000>, f32, _> = dev.sample_normal();
+
+    let normal_binned = normal_dist
+        .array()
+        .into_iter()
+        .fold([0; 100], |mut acc, x| {
+            let idx = (x * 10. + 50.) as usize;
+            acc[idx] += 1;
+            acc
+        });
+
+    let drawing_area =
+        SVGBackend::new("./plots/plotting_histogram.svg", (800, 600)).into_drawing_area();
+
+    let (left, right) = drawing_area.split_horizontally(400);
+
+    use plotters::prelude::*;
+
+    let mut histogram_context = ChartBuilder::on(&left);
+
+    let mut histogram = histogram_context
+        .x_label_area_size(20)
+        .y_label_area_size(20)
+        .caption("Histogram Test", ("sans-serif", 50.0))
+        .build_cartesian_2d((0u32..100u32).into_segmented(), 0f32..1f32)?;
+
+    histogram
+        .configure_mesh()
+        .disable_x_mesh()
+        .bold_line_style(WHITE.mix(0.3))
+        .y_desc("Count")
+        .x_desc("Bucket")
+        .axis_desc_style(("sans-serif", 15))
+        .draw()?;
+
+    println!("normal_binned: {:?}", normal_binned);
+
+    histogram.draw_series(
+        Histogram::vertical(&histogram)
+            .style(RED.filled())
+            .data(
+                normal_binned
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &y)| (i as u32, y as f32 / normal_dist.len() as f32))
+                    .inspect(|(i, y)| {
+                        println!("i: {}, y: {}", i, y);
+                    }),
+            )
+            .margin(0),
+    )?;
+
+    drawing_area.present()?;
 
     Ok(())
 }

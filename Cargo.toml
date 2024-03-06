@@ -18,11 +18,15 @@ name = "convolutions"
 [[bin]]
 name = "plotting"
 
+[[bin]]
+name = "tensors"
+
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git" }
-plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "errorbar", "line_series", "histogram", "point_series"] }
+plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "bitmap_backend", "errorbar", "line_series", "histogram", "point_series"] }
 rand = "0.8.5"
 ndarray = { version = "0.15.6", features = ["blas"] }
 nalgebra = "0.32.3"
 csv = "1.3.0"
 serde = { version ="1.0.196", features = ["serde_derive"] }
+rand_distr = "0.4.3"
