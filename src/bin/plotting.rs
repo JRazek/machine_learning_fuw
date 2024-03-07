@@ -75,14 +75,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(20)
         .y_label_area_size(20)
         .caption("Histogram Test", ("sans-serif", 50.0))
-        .build_cartesian_2d((0u32..100u32).into_segmented(), 0f32..1f32)?;
+        .build_cartesian_2d((0u32..100u32).into_segmented(), 0f32..0.05f32)?;
 
     histogram
         .configure_mesh()
         .disable_x_mesh()
         .bold_line_style(WHITE.mix(0.3))
-        .y_desc("Count")
-        .x_desc("Bucket")
         .axis_desc_style(("sans-serif", 15))
         .draw()?;
 
