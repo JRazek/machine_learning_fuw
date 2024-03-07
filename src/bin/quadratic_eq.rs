@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let point_series =
-        PointSeries::of_element(tensor.array().into_iter(), 2., BLACK.filled(), &gen);
+        PointSeries::of_element(tensor.array().into_iter(), 4., BLACK.filled(), &gen);
 
     chart_context.draw_series(point_series)?;
 
