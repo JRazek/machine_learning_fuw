@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut tensor = generate_set(&mut dev);
 
-    const ITERATIONS: usize = 10000;
+    const ITERATIONS: usize = 2000;
 
     let mut sgd = Sgd::new(
         &tensor,
