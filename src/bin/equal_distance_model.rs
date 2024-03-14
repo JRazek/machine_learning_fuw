@@ -14,7 +14,6 @@ use rand_distr::Uniform;
 
 const N_POINTS: usize = 100;
 
-const EPSILON: f32 = 0.5;
 const A: f32 = 10.;
 const F1: [f32; 2] = [-5., 0.];
 const F2: [f32; 2] = [5., 0.];
@@ -32,25 +31,15 @@ where
 
     let tensor_cloned: Tensor<_, f32, D, OwnedTape<_, _>> = tensor.retaped();
 
-    let shift1 = tensor
-        .sub(f1)
-        .square()
-        .sum::<Rank1<N_POINTS>, _>()
-        .sqrt()
-        .sub(EPSILON * A)
-        .square()
-        .sum();
+    let shift1 = tensor.sub(f1).square().sum::<Rank1<N_POINTS>, _>().sqrt();
 
     let shift2 = tensor_cloned
         .sub(f2)
         .square()
         .sum::<Rank1<N_POINTS>, _>()
-        .sqrt()
-        .sub(EPSILON * A)
-        .square()
-        .sum();
+        .sqrt();
 
-    let sum = shift1.add(shift2);
+    let sum = shift1.add(shift2).sub(2f32 * A).square().sum();
 
     sum
 }
@@ -69,7 +58,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const ITERATIONS: usize = 10000;
 
-    let mut sgd = Sgd::new(&tensor, SgdConfig::default());
+    let mut sgd = Sgd::new(
+        &tensor,
+        SgdConfig {
+            momentum: Some(Momentum::Nesterov(0.9)),
+            lr: 1e-3,
+            weight_decay: Some(WeightDecay::L2(1e-2)),
+        },
+    );
 
     let svg_backend =
         SVGBackend::new("plots/path_descent_plot.svg", (800, 600)).into_drawing_area();
@@ -96,6 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut reference_position1 = Vec::new();
     let mut lossed = Vec::new();
 
+    let rand_tracking = rand::random::<usize>() % N_POINTS;
     for i in 0..ITERATIONS {
         let grads = Gradients::leaky();
         let loss = loss(tensor.trace(grads));
@@ -104,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("iteration: {}, loss: {}", i, loss.array());
         }
 
-        reference_position1.push(tensor.clone().select(dev.tensor(30)).array());
+        reference_position1.push(tensor.clone().select(dev.tensor(rand_tracking)).array());
 
         lossed.push(loss.array());
 
@@ -130,10 +127,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         4f32,
         BLACK.filled(),
     ))?;
-
-    //obecnie nie mam pomysłu, jak mogę narysować Circle z promieniem zadanym przez coord system, a nie
-    //liczbę pixeli, więc na "rozwiązanie analityczne" mogę tylko powiedzieć, że jest na przecięciu
-    //dwóch okręgów o promieniu EPSILON * A i środkach w F1 i F2
 
     svg_backend.present()?;
 
