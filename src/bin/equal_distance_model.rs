@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sgd = Sgd::new(
         &tensor,
         SgdConfig {
-            momentum: Some(Momentum::Nesterov(0.9)),
+            momentum: None,
             lr: 1e-3,
             weight_decay: Some(WeightDecay::L2(1e-2)),
         },
