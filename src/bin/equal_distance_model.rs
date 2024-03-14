@@ -52,6 +52,7 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let time_start = std::time::Instant::now();
     let mut dev = AutoDevice::default();
 
     let mut tensor = generate_set(&mut dev);
@@ -129,6 +130,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ))?;
 
     svg_backend.present()?;
+
+    println!("time: {:?}", time_start.elapsed());
 
     Ok(())
 }
