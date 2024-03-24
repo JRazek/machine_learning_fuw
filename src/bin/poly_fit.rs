@@ -103,17 +103,16 @@ where
     Ok(())
 }
 
-fn modeled_function<const N: usize, D, T>(
-    tensor: Tensor<Rank2<N, 2>, f64, D, T>,
-) -> Tensor<Rank1<N>, f64, D, T>
+fn modeled_function<const N: usize, D>(
+    tensor: Tensor<Rank2<N, 2>, f64, D>,
+) -> Tensor<Rank1<N>, f64, D>
 where
     D: Device<f64>,
-    T: Tape<f64, D>,
 {
     let dev = tensor.device().clone();
     let params: Tensor<Rank2<N, 3>, f64, D> = tensor.device().tensor([2., 3., -2.]).broadcast();
 
-    let input: Tensor<Rank2<N, 3>, _, _, T> =
+    let input: Tensor<Rank2<N, 3>, _, _> =
         (tensor, dev.ones::<Rank2<N, 1>>()).concat_tensor_along(Axis::<1>);
 
     let res: Tensor<Rank1<N>, _, _, _> = (input * params).sum();
