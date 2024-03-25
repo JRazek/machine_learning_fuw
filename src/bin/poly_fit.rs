@@ -1,6 +1,5 @@
 use dfdx::prelude::*;
-use rand::rngs::ThreadRng;
-use rand_distr::Distribution;
+use rand::prelude::*;
 use rand_distr::Uniform;
 
 fn poly(x: f64) -> f64 {
@@ -11,7 +10,7 @@ fn generate_dataset<const N: usize, D>(dev: D) -> Tensor<Rank2<N, 2>, f64, D, No
 where
     D: Device<f64>,
 {
-    let rng = ThreadRng::default();
+    let rng = StdRng::seed_from_u64(14);
     let uniform = Uniform::new(-1., 1.);
 
     let dataset = uniform
@@ -33,7 +32,7 @@ where
 use plotters::prelude::*;
 
 fn draw_dataset<DB>(
-    dataset: impl Iterator<Item = (f32, f32, f32)> + Clone,
+    dataset: impl Iterator<Item = (f64, f64, f64)> + Clone,
     mut chart_builder: ChartBuilder<DB>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
@@ -41,7 +40,7 @@ where
 {
     let mut chart_context = chart_builder
         .caption("dataset", ("Arial", 20))
-        .build_cartesian_3d(-10f32..10f32, -10f32..10f32, -10f32..10f32)?;
+        .build_cartesian_3d(-10f64..10f64, -10f64..10f64, -10f64..10f64)?;
 
     chart_context
         .configure_axes()
@@ -103,6 +102,38 @@ where
     Ok(())
 }
 
+fn draw_model_results<DB>(
+    data: impl Iterator<Item = (f64, (f64, f64))> + Clone,
+    mut right: ChartBuilder<DB>,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    DB: DrawingBackend + 'static,
+{
+    let mut chart_context = right
+        .caption("error = abs(prediction - target)", ("Arial", 20))
+        .set_all_label_area_size(50)
+        .build_cartesian_2d(-10i32..10i32, 0f64..1.2e-5f64)?;
+
+    chart_context
+        .configure_mesh()
+        .x_labels(20)
+        .x_desc("x")
+        .x_label_formatter(&|&x| format!("{:.2}", x as f64 / 10.))
+        .y_labels(10)
+        .y_desc("error")
+        .y_label_formatter(&|&x| format!("{:.1e}", x))
+        .draw()?;
+
+    chart_context.draw_series(
+        Histogram::vertical(&chart_context).data(
+            data.clone()
+                .map(|(x, (y, y_t))| ((x * 10.) as i32, (y - y_t).abs())),
+        ),
+    )?;
+
+    Ok(())
+}
+
 fn modeled_function<const N: usize, D>(
     tensor: Tensor<Rank2<N, 2>, f64, D>,
 ) -> Tensor<Rank1<N>, f64, D>
@@ -138,6 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let dataset = generate_dataset::<N_POINTS, _>(dev.clone());
+    let target = modeled_function(dataset.clone());
 
     let mut loss = Vec::new();
 
@@ -145,9 +177,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let input = dataset.clone().traced(model.alloc_grads());
 
         let output: Tensor<Rank1<N_POINTS>, f64, _, _> = model.forward(input).reshape();
-        let target = modeled_function(dataset.clone());
 
-        let mse = mse_loss(output, target);
+        let mse = mse_loss(output, target.clone());
 
         let loss_val_norm = mse.array();
         loss.push((i as u32, loss_val_norm));
@@ -165,20 +196,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (up, down) = svg_backend.split_vertically(300);
 
+    let (up_left, up_right) = up.split_horizontally(700);
+
+    let (up_left, up_right) = (ChartBuilder::on(&up_left), ChartBuilder::on(&up_right));
+
     draw_dataset(
         dataset
             .array()
             .into_iter()
-            .map(|[a, b]| (a as f32, b as f32, poly(a as f64) as f32)),
-        ChartBuilder::on(&up),
+            .map(|[a, b]| (a as f64, b as f64, poly(a as f64) as f64)),
+        up_left,
     )?;
 
-    let (left, right) = down.split_horizontally(700);
+    let (down_left, down_right) = down.split_horizontally(700);
 
-    let left = ChartBuilder::on(&left);
-    let right = ChartBuilder::on(&right);
+    let down_left = ChartBuilder::on(&down_left);
+    let down_right = ChartBuilder::on(&down_right);
 
-    draw_loss_evolution(loss.into_iter(), left, right)?;
+    draw_loss_evolution(loss.into_iter(), down_left, down_right)?;
+
+    let final_output = dataset.as_vec().into_iter().zip(
+        model
+            .forward(dataset)
+            .reshape::<Rank1<N_POINTS>>()
+            .as_vec()
+            .into_iter()
+            .zip(target.as_vec().into_iter())
+            .map(|(a, b)| (a, b)),
+    );
+
+    draw_model_results(final_output, up_right)?;
 
     svg_backend.present()?;
 
