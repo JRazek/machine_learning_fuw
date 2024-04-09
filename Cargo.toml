@@ -33,6 +33,6 @@ nalgebra = "0.32.3"
 csv = "1.3.0"
 serde = { version ="1.0.196", features = ["serde_derive"] }
 rand_distr = "0.4.3"
-polars = "0.38.3"
+polars = { version = "0.38.3", features = ["temporal"] }
 polars-ops = "0.38.3"
 itertools = "0.12.1"
