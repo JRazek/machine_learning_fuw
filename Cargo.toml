@@ -25,7 +25,7 @@ name = "tensors"
 name = "equal_distance_model"
 
 [dependencies]
-dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"] }
+dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"], rev = "4722a99" }
 plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "bitmap_backend", "errorbar", "line_series", "histogram", "point_series"] }
 rand = "0.8.5"
 ndarray = { version = "0.15.6", features = ["blas"] }
