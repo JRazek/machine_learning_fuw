@@ -237,7 +237,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("a: {}, b: {}, c: {}", a, b, c);
     println!("expected: a: 2, b: 3, c: -2");
 
-    println!("interpretation: jest w pytę");
+    println!("interpretation: prądzi");
 
     Ok(())
 }
