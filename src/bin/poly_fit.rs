@@ -78,7 +78,7 @@ where
         .x_labels(10)
         .x_desc("iteration")
         .y_labels(10)
-        .y_desc("loss")
+        .y_desc("loss (linear scale)")
         .draw()?;
 
     linear_scale.draw_series(LineSeries::new(loss.clone(), &RED))?;
@@ -93,7 +93,7 @@ where
         .x_labels(10)
         .x_desc("iteration")
         .y_labels(10)
-        .y_desc("loss")
+        .y_desc("loss (log scale)")
         .y_label_formatter(&|x| format!("{:.1e}", x))
         .draw()?;
 
@@ -192,9 +192,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sgd.update(&mut model, &grads)?;
     }
 
-    let svg_backend = SVGBackend::new("plots/poly_fit.svg", (1400, 768)).into_drawing_area();
+    let svg_backend = SVGBackend::new("plots/poly_fit.svg", (1400, 800)).into_drawing_area();
+    svg_backend.fill(&WHITE)?;
+    let svg_backend = svg_backend.margin(10, 10, 10, 10);
 
-    let (up, down) = svg_backend.split_vertically(300);
+    let (up, down) = svg_backend.split_vertically(400);
 
     let (up_left, up_right) = up.split_horizontally(700);
 
