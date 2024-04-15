@@ -49,21 +49,6 @@ where
     (coff_tensor, sol_tensor)
 }
 
-fn quadratic_eq_solve([a, b, c]: [DTYPE; 3]) -> Option<[DTYPE; 2]> {
-    let discriminant = b.clone().powi(2) - 4. * a.clone() * c.clone();
-
-    if discriminant < 0. {
-        return None;
-    }
-
-    let discriminant_sqrt = discriminant.sqrt();
-
-    let x1 = (-b.clone() + discriminant_sqrt.clone()) / (a.clone() * 2.);
-    let x2 = (-b - discriminant_sqrt) / (a * 2.);
-
-    Some([x1, x2])
-}
-
 fn train<M, D, O, const N: usize>(
     model: &mut M,
     dataset: Tensor<Rank2<N, 3>, DTYPE, D>,
