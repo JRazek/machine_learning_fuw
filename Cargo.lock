@@ -349,6 +349,7 @@ source = "git+https://github.com/coreylowman/dfdx.git?rev=4722a99#4722a99d303f34
 dependencies = [
  "cudarc",
  "gemm",
+ "glob",
  "libm",
  "memmap2 0.9.4",
  "num-traits",

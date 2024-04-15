@@ -51,52 +51,49 @@ where
     [x1, x2].stack().permute()
 }
 
-fn train<M, D, const N: usize>(
-    mut model: M,
+fn train<M, D, O, const N: usize>(
+    model: &mut M,
     dataset: Tensor<Rank2<N, 3>, f32, D>,
     targets: Tensor<Rank2<N, 2>, f32, D>,
+    batch_size: usize,
     n_iter: usize,
-) -> Result<M, Box<dyn std::error::Error>>
+    optimizer: &mut O,
+) -> Result<Tensor<Rank0, f32, D>, Box<dyn std::error::Error>>
 where
     D: Device<f32>,
     M: Module<
             Tensor<(usize, Const<3>), f32, D, OwnedTape<f32, D>>,
             Output = Tensor<(usize, Const<2>), f32, D, OwnedTape<f32, D>>,
         > + UpdateParams<f32, D>,
+    O: Optimizer<M, f32, D>,
 {
-    let mut sgd = Sgd::<_, f32, D>::new(
-        &model,
-        SgdConfig {
-            lr: 1e-3,
-            momentum: None,
-            weight_decay: Some(WeightDecay::L2(1e-9)),
-        },
-    );
+    if n_iter < batch_size {
+        Err("n_iter must be greater than or equal to batch_size")?;
+    }
 
-    const BATCH_SIZE: usize = 16;
+    let batches = (0..(N.div_euclid(batch_size))).map(|i| {
+        let start = i * batch_size;
+        let end = (i + 1) * batch_size;
 
-    let batches = (0..N / BATCH_SIZE).map(|i| {
-        let start = i * BATCH_SIZE;
-        let end = (i + 1) * BATCH_SIZE;
-
-        let inputs = dataset
-            .clone()
-            .slice((start..end, ..))
-            .retaped::<OwnedTape<f32, D>>();
+        let inputs = dataset.clone().slice((start..end, ..));
         let targets = targets.clone().slice((start..end, ..));
 
         (inputs, targets)
     });
 
+    let mut losses = Vec::new();
+
     for i in 0..n_iter {
         for (inputs, targets) in batches.clone() {
-            let outputs = model.forward(inputs);
-            let loss = mse_loss(outputs, targets.clone()).mean();
+            let outputs = model.forward(inputs.retaped::<OwnedTape<_, _>>());
+            let loss = mse_loss(outputs, targets.clone()).nans_to(0.);
             let loss_num = loss.as_vec();
+
+            losses.push(loss.retaped::<NoneTape>());
 
             let grads = loss.backward();
 
-            sgd.update(&mut model, &grads)?;
+            optimizer.update(model, &grads)?;
 
             if i % 100 == 0 {
                 println!("Iter: {} Loss: {:?}", i, loss_num);
@@ -104,7 +101,9 @@ where
         }
     }
 
-    Ok(model)
+    let mean_loss = losses.stack().mean();
+
+    Ok(mean_loss)
 }
 
 #[derive(Clone, Sequential, Default)]
@@ -113,19 +112,54 @@ struct Model {
     activation1: Softmax,
     linear2: LinearConstConfig<20, 20>,
     activation2: LeakyReLU,
-    linear3: LinearConstConfig<20, 2>,
+    linear3: LinearConstConfig<20, 20>,
+    activation3: LeakyReLU,
+    linear4: LinearConstConfig<20, 2>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dev = AutoDevice::default();
 
-    let tensor: Tensor<Rank2<1000, 3>, _, _> = quadratic_eq_gen(&mut dev);
+    println!("Device: {:?}", dev);
 
-    let model = dev.build_module::<f32>(Model::default());
+    let mut model = dev.build_module::<f32>(Model::default());
 
-    let model = train(model, tensor.clone(), quadratic_eq_solve(tensor), 100_00)?;
+    match model.load_safetensors("models/quadratic_eq_model") {
+        Ok(_) => {
+            println!("Model loaded successfully!");
+        }
+        Err(e) => {
+            println!("Error loading model: {:?}", e);
+            println!("Proceeding with randomly initialized model...");
+        }
+    }
 
-    model.save_safetensors("models/quadratic_eq_model")?;
+    let mut sgd = Sgd::new(
+        &model,
+        SgdConfig {
+            lr: 1e-6,
+            momentum: None,
+            weight_decay: Some(WeightDecay::L2(1e-8)),
+        },
+    );
+
+    for epoch in 0..100 {
+        let dataset: Tensor<Rank2<400, 3>, _, _> = quadratic_eq_gen(&mut dev);
+
+        let mean_loss = train(
+            &mut model,
+            dataset.clone(),
+            quadratic_eq_solve(dataset.clone()),
+            100,
+            1000,
+            &mut sgd,
+        )?;
+
+        println!("Epoch: {} Mean Loss: {:?}", epoch, mean_loss.as_vec());
+
+        model.save_safetensors("models/quadratic_eq_model")?;
+        println!("Model saved on epoch {}", epoch);
+    }
 
     let svg_backend =
         SVGBackend::new("plots/quadratic_eq_solutions.svg", (1024, 768)).into_drawing_area();
