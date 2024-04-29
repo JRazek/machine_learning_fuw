@@ -31,11 +31,10 @@ where
         .x_desc("Predicted")
         .x_label_formatter(&label_formatter)
         .y_labels(cat_cnt)
-        .y_desc("Label")
+        .y_desc("Expected")
         .y_label_formatter(&label_formatter)
         .draw()?;
 
-    let len = expected.len() as f32;
     let mut matrix = vec![vec![0f32; cat_cnt]; cat_cnt];
     expected
         .iter()
@@ -45,7 +44,8 @@ where
         });
 
     matrix.iter_mut().for_each(|row| {
-        row.iter_mut().for_each(|x| *x /= len);
+        let sum: f32 = row.iter().sum();
+        row.iter_mut().for_each(|v| *v /= sum);
     });
 
     chart_context_left.draw_series(matrix.iter().enumerate().flat_map(|(label_id, row)| {
@@ -55,7 +55,7 @@ where
                     (label_id, predicted_id),
                     ((label_id + 1), (predicted_id + 1)),
                 ],
-                BLACK.mix(v.into()).filled(),
+                BLACK.mix(v as f64).filled(),
             )
         })
     }))?;

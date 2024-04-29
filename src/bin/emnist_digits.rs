@@ -145,8 +145,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const N_IN: usize = 28 * 28;
     const LABELS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+    let mut rng = StdRng::seed_from_u64(0);
+
     //TODO LOAD
-    let mnist_path = "/home/user/Pictures/qm_homework/emnist/";
+    let mnist_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "data/emnist/".to_string());
 
     let dev = AutoDevice::default();
     let model_path = Path::new("models/character_recognition");
@@ -155,24 +159,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Loading mnist train...");
     let mut mnist_train: Vec<_> = load_data::<f32, _, _>(
-        format!("{}/emnist-letters-train-images-idx3-ubyte.gz", mnist_path),
-        format!("{}/emnist-letters-train-labels-idx1-ubyte.gz", mnist_path),
-    )?
-    .into_iter()
-    .filter(|img| img.classification < N_OUT as u8)
-    .take(20000)
-    .collect();
+        format!("{}/emnist-balanced-train-images-idx3-ubyte.gz", mnist_path),
+        format!("{}/emnist-balanced-train-labels-idx1-ubyte.gz", mnist_path),
+    )?;
+    mnist_train.shuffle(&mut rng);
+    mnist_train = mnist_train
+        .into_iter()
+        .filter(|img| img.classification < N_OUT as u8)
+        .take(20000)
+        .collect();
     println!("Loaded {} training images", mnist_train.len());
 
     println!("Loading mnist test...");
-    let mnist_test: Vec<_> = load_data::<f32, _, _>(
-        format!("{}/emnist-letters-test-images-idx3-ubyte.gz", mnist_path),
-        format!("{}/emnist-letters-test-labels-idx1-ubyte.gz", mnist_path),
-    )?
-    .into_iter()
-    .filter(|img| img.classification < N_OUT as u8)
-    .take(1000)
-    .collect();
+    let mut mnist_test: Vec<_> = load_data::<f32, _, _>(
+        format!("{}/emnist-balanced-test-images-idx3-ubyte.gz", mnist_path),
+        format!("{}/emnist-balanced-test-labels-idx1-ubyte.gz", mnist_path),
+    )?;
+    mnist_test.shuffle(&mut rng);
+    mnist_test = mnist_test
+        .into_iter()
+        .filter(|img| img.classification < N_OUT as u8)
+        .take(1000)
+        .collect();
 
     println!("Loaded {} test images", mnist_train.len());
 
@@ -190,7 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rms_prop = RMSprop::new(
         &model,
         RMSpropConfig {
-            lr: 1e-4,
+            lr: 1e-3,
             alpha: 0.9,
             eps: 1e-7,
             momentum: None,
@@ -199,13 +207,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    let mut rng = StdRng::seed_from_u64(0);
-
     let (eval_data, eval_labels) = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_test, 1000)
         .nth(0)
         .unwrap();
 
-    for epoch in 0..100 {
+    for epoch in 0..1000 {
         let mut loss_epoch = None;
 
         mnist_train.shuffle(&mut rng);
