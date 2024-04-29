@@ -50,15 +50,17 @@ pub struct MnistImage<T> {
     pub classification: u8,
 }
 
-pub fn load_data<T>(dataset_name: &str) -> Result<Vec<MnistImage<T>>, std::io::Error>
+pub fn load_data<T, P1, P2>(
+    img_path: P1,
+    labels_path: P2,
+) -> Result<Vec<MnistImage<T>>, std::io::Error>
 where
     T: num::Float + num::FromPrimitive,
+    P1: AsRef<std::path::Path>,
+    P2: AsRef<std::path::Path>,
 {
-    let filename = format!("{}/emnist-letters-train-labels-idx1-ubyte.gz", dataset_name);
-    let label_data = &MnistData::new(&(File::open(filename))?)?;
-
-    let filename = format!("{}/emnist-letters-train-images-idx3-ubyte.gz", dataset_name);
-    let images_data = &MnistData::new(&(File::open(filename))?)?;
+    let label_data = &MnistData::new(&(File::open(labels_path))?)?;
+    let images_data = &MnistData::new(&(File::open(img_path))?)?;
 
     let mut images: Vec<Array2<T>> = Vec::new();
     let image_shape = (images_data.sizes[1] * images_data.sizes[2]) as usize;

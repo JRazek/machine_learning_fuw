@@ -12,18 +12,7 @@ use rand::seq::SliceRandom;
 use num::FromPrimitive;
 
 use uczenie_maszynowe_fuw::emnist_loader::*;
-
-type DTYPE = f32;
-
-fn load_mnist<const N: usize, D>(
-    dev: &mut D,
-    seed: u64,
-) -> (Tensor<Rank2<N, 3>, DTYPE, D>, Tensor<Rank2<N, 2>, DTYPE, D>)
-where
-    D: Device<DTYPE>,
-{
-    todo!()
-}
+use uczenie_maszynowe_fuw::plots::plot_error_matrix;
 
 fn eval<M, E, D, const N: usize, const N_IN: usize, const N_OUT: usize>(
     model: &M,
@@ -63,74 +52,6 @@ struct Model<const N_IN: usize, const N_OUT: usize> {
     linear7: LinearConstConfig<20, N_OUT>,
 }
 
-//https://github.com/plotters-rs/plotters/blob/68790025c362ca0dc8ea47f48239cc9d8e09d6f6/plotters/src/coord/ranged1d/combinators/linspace.rs#L161
-fn plot_results(errors: Vec<f32>, losses: Vec<f32>) -> Result<(), Box<dyn std::error::Error>> {
-    use plotters::prelude::*;
-
-    let svg_backend =
-        SVGBackend::new("plots/quadratic_eq_solutions.svg", (1600, 600)).into_drawing_area();
-    svg_backend.fill(&WHITE)?;
-
-    let (left, right) = svg_backend.split_horizontally(800);
-
-    let mut left = ChartBuilder::on(&left);
-
-    let mut chart_context_left = left
-        .caption("Quadratic equation solutions", ("Arial", 20))
-        .set_all_label_area_size(50)
-        .margin(50)
-        .build_cartesian_2d((-5f32..5f32).step(0.1).use_round(), 0..500)?;
-
-    chart_context_left
-        .configure_mesh()
-        .x_labels(30)
-        .x_label_formatter(&|x| format!("{:.0}", x))
-        .x_desc("Bucket")
-        .y_labels(20)
-        .y_desc("Relative Error")
-        .draw()?;
-
-    let histogram = Histogram::vertical(&chart_context_left)
-        .style(BLUE.mix(0.5).filled())
-        .margin(0)
-        .data(errors.into_iter().map(|e| (e as f32, 1)));
-
-    chart_context_left.draw_series(histogram)?;
-
-    let mut right = ChartBuilder::on(&right);
-
-    let max_loss = *losses
-        .iter()
-        .max_by(|&a, &b| a.partial_cmp(b).unwrap())
-        .unwrap();
-
-    let mut chart_context_right = right
-        .caption("Loss", ("Arial", 20))
-        .set_all_label_area_size(70)
-        .margin(50)
-        .build_cartesian_2d(0..losses.len(), (0f32..max_loss).log_scale())?;
-
-    chart_context_right
-        .configure_mesh()
-        .x_labels(30)
-        .x_desc("Iteration")
-        .y_labels(20)
-        .y_desc("Loss")
-        .y_label_formatter(&|y| format!("{:.1e}", y))
-        .draw()?;
-
-    let losses = LineSeries::new(
-        losses.into_iter().enumerate().map(|(i, l)| (i, l)),
-        BLUE.filled(),
-    );
-
-    chart_context_right.draw_series(losses)?;
-
-    svg_backend.present()?;
-
-    Ok(())
-}
-
 fn load_chunked_mnist_images<'a, const N_IN: usize, E, D>(
     dev: &'a D,
     mnist: &'a [MnistImage<E>],
@@ -162,8 +83,6 @@ where
     mnist
 }
 
-fn plot_evals() {}
-
 fn make_one_hots<const N: usize, const N_OUT: usize, E, D>(
     dev: &D,
     labels: &[u8],
@@ -194,7 +113,7 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut dev = AutoDevice::default();
+    let dev = AutoDevice::default();
     const BATCH_SIZE: usize = 100;
     let model_path = Path::new("models/character_recognition");
 
@@ -205,14 +124,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading mnist...");
 
     const N_OUT: usize = 36;
-    let mut mnist: Vec<_> = load_data::<f32>("/home/user/Pictures/qm_homework/emnist")?
-        .into_iter()
-        .filter(|img| img.classification < N_OUT as u8)
-        .collect();
+    let mut mnist_train: Vec<_> = load_data::<f32, _, _>(
+        "/home/user/Pictures/qm_homework/emnist/emnist-letters-train-images-idx3-ubyte.gz",
+        "/home/user/Pictures/qm_homework/emnist/emnist-letters-train-labels-idx1-ubyte.gz",
+    )?
+    .into_iter()
+    .filter(|img| img.classification < N_OUT as u8)
+    .collect();
 
-    println!("Loaded {} images", mnist.len());
+    println!("Loaded {} images", mnist_train.len());
 
-    let mut model = dev.build_module::<DTYPE>(Model::<N_IN, N_OUT>::default());
+    let mut model = dev.build_module::<f32>(Model::<N_IN, N_OUT>::default());
 
     match model.load_safetensors(model_path) {
         Ok(_) => {
@@ -238,12 +160,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rng = StdRng::seed_from_u64(0);
 
+    let eval: Vec<_> = load_chunked_mnist_images::<1000, _, _>(
+        &dev,
+        mnist_train.split_off(mnist_train.len() - 1000).as_slice(),
+        1,
+    )
+    .collect();
+
     for epoch in 0..100 {
         let mut loss_epoch = None;
 
-        mnist.shuffle(&mut rng);
+        mnist_train.shuffle(&mut rng);
 
-        let batch_iter = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist, BATCH_SIZE);
+        let batch_iter = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_train, BATCH_SIZE);
 
         for (batch, labels) in batch_iter.clone() {
             let tensor = batch.try_realize::<Rank2<BATCH_SIZE, N_IN>>();
