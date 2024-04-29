@@ -85,7 +85,7 @@ fn training_pipeline<const N_IN: usize, const N_OUT: usize, D, E, M>(
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     D: Device<E>,
-    E: Dtype + FromPrimitive + num::Float + npyz::Deserialize + std::fmt::Display,
+    E: Dtype + FromPrimitive + num::Float + npyz::Deserialize + std::fmt::Display + Into<f32>,
     M: Module<
         Tensor<(usize, Const<N_IN>), E, D, OwnedTape<E, D>>,
         Output = Tensor<(usize, Const<N_OUT>), E, D, OwnedTape<E, D>>,
@@ -134,7 +134,8 @@ where
         rng,
     };
 
-    let svg_backend = SVGBackend::new("plots/emnist_digits.svg", (1800, 600)).into_drawing_area();
+    let mut losses_all = Vec::new();
+    let mut grad_magnitudes_all = Vec::new();
 
     train::<N_IN, N_OUT, 3000, _, _, _, _>(
         dev,
@@ -149,12 +150,20 @@ where
              eval_labels,
              accuracy,
          }| {
+            losses_all.extend_from_slice(&losses);
+            grad_magnitudes_all.extend_from_slice(&grad_magnitudes);
+
+            model.save_safetensors(model_save_path.as_ref())?;
+
             println!(
                 "Epoch: {}, loss_train: {}, accuracy: {:.2}%",
                 epoch,
                 losses.last().unwrap(),
                 accuracy * 100f32
             );
+
+            let svg_backend =
+                SVGBackend::new("plots/emnist_digits.svg", (1800, 600)).into_drawing_area();
 
             match svg_backend.split_evenly((1, 3)).as_slice() {
                 [error_matrix_area, losses_area, gradients_area, ..] => {
@@ -166,15 +175,17 @@ where
                         &error_matrix_area,
                     )?;
 
-                    //                    plot_log_scale_data(&losses, "loss train", &losses_area)?;
-                    //                    plot_log_scale_data(&grad_magnitudes, "gradient norm", &gradients_area)?;
+                    let losses: Vec<f32> = losses_all.iter().map(|&x| x.into()).collect();
+                    plot_log_scale_data(&losses, "loss train", &losses_area)?;
+
+                    let grad_magnitudes: Vec<f32> =
+                        grad_magnitudes_all.iter().map(|&x| x.into()).collect();
+                    plot_log_scale_data(&grad_magnitudes, "gradient norm", &gradients_area)?;
                 }
                 _ => panic!(),
             }
 
             svg_backend.present()?;
-
-            model.save_safetensors(model_save_path.as_ref())?;
 
             Ok(())
         },
@@ -191,13 +202,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .unwrap_or_else(|| "data/emnist/".to_string());
 
-    let model_path = Path::new("models/character_recognition");
+    let model_path = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "models/emnist_characters_model".to_string());
 
     let dev = AutoDevice::default();
 
-    let mut model = dev.build_module::<f32>(Model::<N_IN, { LABELS.len() }>::default());
+    let mut model = dev.build_module::<f32>(Model::<N_IN, N_OUT>::default());
 
-    match model.load_safetensors(model_path) {
+    match model.load_safetensors(&model_path) {
         Ok(_) => {
             println!("Model loaded successfully!");
         }
@@ -207,9 +220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let model = dev.build_module::<f32>(Model::<N_OUT, { LABELS.len() }>::default());
-
-    training_pipeline(&mnist_path, dev, model, model_path)?;
+    training_pipeline(&mnist_path, dev, model, &model_path)?;
 
     Ok(())
 }

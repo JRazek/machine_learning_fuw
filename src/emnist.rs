@@ -30,9 +30,10 @@ where
             .flatten()
             .collect();
 
-        let len = chunk.len();
+        //not all chunks are of chunk_size - last one may not be.
+        let current_chunk_len = chunk.len();
 
-        let tensor = dev.tensor_from_vec(buffer, (len, Const::<N_IN>::default()));
+        let tensor = dev.tensor_from_vec(buffer, (current_chunk_len, Const::<N_IN>::default()));
 
         let labels: Vec<u8> = chunk
             .into_iter()
@@ -191,9 +192,10 @@ where
         },
     );
 
-    let (eval_data, eval_labels) = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_test, 1000)
-        .nth(0)
-        .unwrap();
+    let (eval_data, eval_labels) =
+        load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_test, mnist_test.len())
+            .nth(0)
+            .unwrap();
     let eval_data = eval_data.realize();
 
     let mut grad_magnitudes = Vec::new();

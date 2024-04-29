@@ -25,7 +25,7 @@ name = "tensors"
 name = "equal_distance_model"
 
 [[bin]]
-name = "emnist_digits"
+name = "emnist_characters_train"
 
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"], rev = "4722a99" }
@@ -44,6 +44,7 @@ openblas-src = { version = "0.6.0", default-features = false, features = ["cblas
 byteorder = "1.5.0"
 flate2 = "1.0.29"
 num = "0.4.2"
+npyz = "0.8.3"
 
 [features]
 cuda = ["dfdx/cuda"]
