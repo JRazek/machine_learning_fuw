@@ -24,6 +24,9 @@ name = "tensors"
 [[bin]]
 name = "equal_distance_model"
 
+[[bin]]
+name = "emnist_digits"
+
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"], rev = "4722a99" }
 plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "bitmap_backend", "errorbar", "line_series", "histogram", "point_series"] }
@@ -36,6 +39,11 @@ rand_distr = "0.4.3"
 polars = { version = "0.38.3", features = ["temporal"] }
 polars-ops = "0.38.3"
 itertools = "0.12.1"
+blas-src = { version = "0.2.0", default-features = false, features = ["openblas"] }
+openblas-src = { version = "0.6.0", default-features = false, features = ["cblas", "system"] }
+byteorder = "1.5.0"
+flate2 = "1.0.29"
+num = "0.4.2"
 
 [features]
 cuda = ["dfdx/cuda"]
