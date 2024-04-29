@@ -19,13 +19,20 @@ where
     let mut chart_context_left = left
         .set_all_label_area_size(50)
         .margin(50)
-        .build_cartesian_2d(0..cat_cnt - 1, 0..cat_cnt - 1)?;
+        .build_cartesian_2d(
+            (0..cat_cnt - 1).into_segmented(),
+            (0..cat_cnt - 1).into_segmented(),
+        )?;
 
-    let label_formatter = |idx: &usize| category_formatter(*idx);
+    let label_formatter = |idx: &SegmentValue<usize>| match *idx {
+        SegmentValue::Exact(v) => category_formatter(v),
+        SegmentValue::CenterOf(v) => category_formatter(v),
+        SegmentValue::Last => "N/A".to_string(),
+    };
     chart_context_left
         .configure_mesh()
+        .light_line_style(&WHITE)
         .x_labels(cat_cnt)
-        .x_label_formatter(&|x| format!("{:.0}", x))
         .x_desc("Predicted")
         .x_label_formatter(&label_formatter)
         .y_labels(cat_cnt)
@@ -55,8 +62,14 @@ where
         row.iter().enumerate().map(move |(predicted_id, &v)| {
             Rectangle::new(
                 [
-                    (label_id, predicted_id),
-                    ((label_id + 1), (predicted_id + 1)),
+                    (
+                        SegmentValue::Exact(label_id),
+                        SegmentValue::Exact(predicted_id),
+                    ),
+                    (
+                        SegmentValue::Exact(label_id + 1),
+                        SegmentValue::Exact(predicted_id + 1),
+                    ),
                 ],
                 BLACK.mix(v as f64).filled(),
             )

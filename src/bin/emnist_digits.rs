@@ -23,22 +23,13 @@ struct Model<const N_IN: usize, const N_OUT: usize> {
     activation1: Tanh,
 
     linear2: LinearConstConfig<128, 128>,
-    activation2: FastGeLU,
+    activation2: Tanh,
 
     linear3: LinearConstConfig<128, 128>,
     activation3: FastGeLU,
 
-    linear4: LinearConstConfig<128, 128>,
-    activation4: Tanh,
-
-    linear5: LinearConstConfig<128, 128>,
-    activation5: FastGeLU,
-
-    linear6: LinearConstConfig<128, 128>,
-    activation6: Tanh,
-
     linear7: LinearConstConfig<128, 128>,
-    activation7: FastGeLU,
+    activation7: Tanh,
 
     linear8: LinearConstConfig<128, 128>,
     activation8: Tanh,
