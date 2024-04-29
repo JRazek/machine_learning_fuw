@@ -14,6 +14,8 @@ use num::FromPrimitive;
 use uczenie_maszynowe_fuw::emnist_loader::*;
 use uczenie_maszynowe_fuw::plots::plot_error_matrix;
 
+use plotters::prelude::*;
+
 fn eval<M, E, D, const N: usize, const N_IN: usize, const N_OUT: usize>(
     model: &M,
     data: Tensor<Rank2<N, N_IN>, E, D>,
@@ -50,6 +52,7 @@ struct Model<const N_IN: usize, const N_OUT: usize> {
     linear6: LinearConstConfig<20, 20>,
     activation6: FastGeLU,
     linear7: LinearConstConfig<20, N_OUT>,
+    softmax: Softmax,
 }
 
 fn load_chunked_mnist_images<'a, const N_IN: usize, E, D>(
@@ -112,30 +115,66 @@ where
     Ok(one_hots_tensor)
 }
 
+fn convert_max_outputs_to_category<const N_OUT: usize, E, D>(
+    output: Tensor<(usize, Const<N_OUT>), E, D>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>>
+where
+    E: Dtype + FromPrimitive,
+    D: Device<E>,
+{
+    let max_categories: Vec<_> = output
+        .as_vec()
+        .chunks_exact(N_OUT)
+        .map(|chunk| {
+            chunk
+                .into_iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .unwrap()
+                .0 as u8
+        })
+        .collect();
+
+    Ok(max_categories)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let dev = AutoDevice::default();
     const BATCH_SIZE: usize = 100;
+    const N_OUT: usize = 36;
+    const N_IN: usize = 28 * 28;
+
+    //TODO LOAD
+    let mnist_path = "/home/user/Pictures/qm_homework/emnist/";
+
+    let dev = AutoDevice::default();
     let model_path = Path::new("models/character_recognition");
 
     println!("Device: {:?}", dev);
 
-    const N_IN: usize = 28 * 28;
-
-    println!("Loading mnist...");
-
-    const N_OUT: usize = 36;
+    println!("Loading mnist train...");
     let mut mnist_train: Vec<_> = load_data::<f32, _, _>(
-        "/home/user/Pictures/qm_homework/emnist/emnist-letters-train-images-idx3-ubyte.gz",
-        "/home/user/Pictures/qm_homework/emnist/emnist-letters-train-labels-idx1-ubyte.gz",
+        format!("{}/emnist-letters-train-images-idx3-ubyte.gz", mnist_path),
+        format!("{}/emnist-letters-train-labels-idx1-ubyte.gz", mnist_path),
     )?
     .into_iter()
     .filter(|img| img.classification < N_OUT as u8)
+    .take(20000)
+    .collect();
+    println!("Loaded {} training images", mnist_train.len());
+
+    println!("Loading mnist test...");
+    let mut mnist_test: Vec<_> = load_data::<f32, _, _>(
+        format!("{}/emnist-letters-test-images-idx3-ubyte.gz", mnist_path),
+        format!("{}/emnist-letters-test-labels-idx1-ubyte.gz", mnist_path),
+    )?
+    .into_iter()
+    .filter(|img| img.classification < N_OUT as u8)
+    .take(1000)
     .collect();
 
-    println!("Loaded {} images", mnist_train.len());
+    println!("Loaded {} test images", mnist_train.len());
 
     let mut model = dev.build_module::<f32>(Model::<N_IN, N_OUT>::default());
-
     match model.load_safetensors(model_path) {
         Ok(_) => {
             println!("Model loaded successfully!");
@@ -160,12 +199,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rng = StdRng::seed_from_u64(0);
 
-    let eval: Vec<_> = load_chunked_mnist_images::<1000, _, _>(
-        &dev,
-        mnist_train.split_off(mnist_train.len() - 1000).as_slice(),
-        1,
-    )
-    .collect();
+    let (eval_data, eval_labels) = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_test, 1000)
+        .nth(0)
+        .unwrap();
 
     for epoch in 0..100 {
         let mut loss_epoch = None;
@@ -195,6 +231,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Epoch: {}, Loss: {}", epoch, loss_epoch);
 
         model.save_safetensors(model_path)?;
+
+        let svg_backend =
+            SVGBackend::new("plots/emnist_digits.svg", (800, 600)).into_drawing_area();
+
+        let predicted_eval = convert_max_outputs_to_category(model.try_forward(eval_data.clone())?)?;
+
+        plot_error_matrix(&eval_labels, &predicted_eval, &['0'; N_OUT], &svg_backend)?;
     }
 
     println!("Saving model...");

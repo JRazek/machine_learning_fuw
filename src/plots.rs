@@ -1,16 +1,15 @@
 use plotters::coord::Shift;
 use plotters::prelude::*;
 
-pub fn plot_error_matrix<const CAT_CNT: usize, DB, RC>(
+pub fn plot_error_matrix<const CAT_CNT: usize, DB>(
     labels: &[u8],
     predictions: &[u8],
     category_mapping: &[char; CAT_CNT],
-    drawing_area: DrawingArea<DB, Shift>,
+    drawing_area: &DrawingArea<DB, Shift>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     DB: DrawingBackend,
     <DB as DrawingBackend>::ErrorType: 'static,
-    RC: Ranged<ValueType = f32>,
 {
     use plotters::prelude::*;
 
