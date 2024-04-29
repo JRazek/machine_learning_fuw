@@ -134,13 +134,16 @@ where
     Ok(categories)
 }
 
+#[derive(Debug)]
 pub struct TrainSetup<E> {
     pub mnist_train: Vec<MnistImage<E>>,
     pub mnist_test: Vec<MnistImage<E>>,
     pub rng: StdRng,
 }
 
+#[derive(Debug, Clone)]
 pub struct EpochData<E> {
+    pub epoch: usize,
     pub losses: Vec<E>,
     pub grad_magnitudes: Vec<E>,
     pub predicted_eval: Vec<u8>,
@@ -148,11 +151,11 @@ pub struct EpochData<E> {
     pub accuracy: f32,
 }
 
-fn train<D, E, M, F, const N_IN: usize, const N_OUT: usize, const BATCH_SIZE: usize>(
+pub fn train<const N_IN: usize, const N_OUT: usize, const BATCH_SIZE: usize, D, E, M, F>(
     dev: D,
     mut model: M,
     train_setup: TrainSetup<E>,
-    mut epoch_callback: Option<F>,
+    mut epoch_callback: F,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     D: Device<E>,
@@ -168,7 +171,6 @@ where
     M: UpdateParams<E, D>,
     F: FnMut(&M, EpochData<E>) -> Result<(), Box<dyn std::error::Error>>,
 {
-
     let TrainSetup {
         mut mnist_train,
         mnist_test,
@@ -243,24 +245,16 @@ where
                 ) as f32
                 / eval_labels.len() as f32;
 
-        println!(
-            "Epoch: {}, loss_train: {}, accuracy: {:.2}%",
+        let epoch_data = EpochData {
             epoch,
-            losses.last().unwrap(),
-            accuracy * 100f32
-        );
+            losses,
+            grad_magnitudes: grad_magnitudes.clone(),
+            predicted_eval,
+            eval_labels: eval_labels.clone(),
+            accuracy,
+        };
 
-        if let Some(ref mut callback) = epoch_callback {
-            let epoch_data = EpochData {
-                losses,
-                grad_magnitudes: grad_magnitudes.clone(),
-                predicted_eval,
-                eval_labels: eval_labels.clone(),
-                accuracy,
-            };
-
-            callback(&model, epoch_data)?;
-        }
+        epoch_callback(&model, epoch_data)?;
     }
 
     Ok(())
