@@ -13,8 +13,7 @@ use rand::seq::SliceRandom;
 use num::FromPrimitive;
 
 use uczenie_maszynowe_fuw::emnist_loader::*;
-use uczenie_maszynowe_fuw::plots::plot_error_matrix;
-use uczenie_maszynowe_fuw::plots::plot_loss_error;
+use uczenie_maszynowe_fuw::plots::*;
 
 use plotters::prelude::*;
 
@@ -30,19 +29,19 @@ struct Model<const N_IN: usize, const N_OUT: usize> {
     activation3: FastGeLU,
 
     linear4: LinearConstConfig<128, 128>,
-    activation4: FastGeLU,
+    activation4: Tanh,
 
     linear5: LinearConstConfig<128, 128>,
     activation5: FastGeLU,
 
     linear6: LinearConstConfig<128, 128>,
-    activation6: FastGeLU,
+    activation6: Tanh,
 
     linear7: LinearConstConfig<128, 128>,
     activation7: FastGeLU,
 
     linear8: LinearConstConfig<128, 128>,
-    activation8: FastGeLU,
+    activation8: Tanh,
 
     linear9: LinearConstConfig<128, N_OUT>,
 }
@@ -189,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rms_prop = RMSprop::new(
         &model,
         RMSpropConfig {
-            lr: 1e-4,
+            lr: 1e-3,
             alpha: 0.9,
             eps: 1e-7,
             momentum: Some(0.9),
@@ -202,6 +201,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(0)
         .unwrap();
 
+    let mut grad_magnitudes = Vec::new();
     let mut losses = Vec::new();
 
     for epoch in 0..10000 {
@@ -221,6 +221,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 losses.push(loss.as_vec()[0]);
 
                 let grads = loss.backward();
+                let tensor_grad_magnitude = grads
+                    .get(&tensor)
+                    .select(dev.tensor(0))
+                    .square()
+                    .sum()
+                    .sqrt();
+                grad_magnitudes.push(tensor_grad_magnitude.as_vec()[0]);
 
                 rms_prop.update(&mut model, &grads)?;
             }
@@ -229,7 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model.save_safetensors(model_path)?;
 
         let svg_backend =
-            SVGBackend::new("plots/emnist_digits.svg", (1200, 600)).into_drawing_area();
+            SVGBackend::new("plots/emnist_digits.svg", (1800, 600)).into_drawing_area();
 
         let predicted_eval =
             convert_max_outputs_to_category(model.try_forward(eval_data.clone())?)?;
@@ -257,17 +264,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             accuracy * 100f32
         );
 
-        let (left, right) = svg_backend.split_horizontally(600);
+        match svg_backend.split_evenly((1, 3)).as_slice() {
+            [error_matrix_area, losses_area, gradients_area, ..] => {
+                plot_error_matrix(
+                    &eval_labels,
+                    &predicted_eval,
+                    36,
+                    &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
+                    &error_matrix_area,
+                )?;
 
-        plot_error_matrix(
-            &eval_labels,
-            &predicted_eval,
-            36,
-            &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
-            &left,
-        )?;
-
-        plot_loss_error(&losses, &right)?;
+                plot_log_scale_data(&losses, "loss train", &losses_area)?;
+                plot_log_scale_data(&grad_magnitudes, "gradient norm", &gradients_area)?;
+            }
+            _ => panic!(),
+        }
 
         svg_backend.present()?;
     }

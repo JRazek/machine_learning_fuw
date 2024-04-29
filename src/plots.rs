@@ -66,8 +66,9 @@ where
     Ok(())
 }
 
-pub fn plot_loss_error<DB>(
-    losses: &[f32],
+pub fn plot_log_scale_data<DB>(
+    data: &[f32],
+    label: &str,
     drawing_area: &DrawingArea<DB, Shift>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
@@ -78,28 +79,28 @@ where
 
     let mut drawing_area = ChartBuilder::on(&drawing_area);
 
-    let max_loss = *losses
+    let max_loss = *data
         .iter()
         .max_by(|&a, &b| a.partial_cmp(b).unwrap())
         .unwrap();
 
     let mut chart_context_right = drawing_area
-        .caption("Loss", ("Arial", 20))
+        .caption(label, ("Arial", 20))
         .set_all_label_area_size(70)
         .margin(50)
-        .build_cartesian_2d(0..losses.len(), (0f32..max_loss).log_scale())?;
+        .build_cartesian_2d(0..data.len(), (0f32..max_loss).log_scale())?;
 
     chart_context_right
         .configure_mesh()
         .x_labels(10)
         .x_desc("Iteration")
         .y_labels(10)
-        .y_desc("Loss")
+        .y_desc(label)
         .y_label_formatter(&|y| format!("{:.1e}", y))
         .draw()?;
 
     let losses = LineSeries::new(
-        losses.into_iter().enumerate().map(|(i, &l)| (i, l)),
+        data.into_iter().enumerate().map(|(i, &l)| (i, l)),
         BLUE.filled(),
     );
 
