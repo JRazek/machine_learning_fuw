@@ -1,4 +1,5 @@
 #![feature(iter_array_chunks)]
+#![feature(ascii_char)]
 
 use dfdx::prelude::*;
 
@@ -142,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const BATCH_SIZE: usize = 100;
     const N_OUT: usize = 36;
     const N_IN: usize = 28 * 28;
+    const LABELS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     //TODO LOAD
     let mnist_path = "/home/user/Pictures/qm_homework/emnist/";
@@ -163,7 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loaded {} training images", mnist_train.len());
 
     println!("Loading mnist test...");
-    let mut mnist_test: Vec<_> = load_data::<f32, _, _>(
+    let mnist_test: Vec<_> = load_data::<f32, _, _>(
         format!("{}/emnist-letters-test-images-idx3-ubyte.gz", mnist_path),
         format!("{}/emnist-letters-test-labels-idx1-ubyte.gz", mnist_path),
     )?
@@ -235,9 +237,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let svg_backend =
             SVGBackend::new("plots/emnist_digits.svg", (800, 600)).into_drawing_area();
 
-        let predicted_eval = convert_max_outputs_to_category(model.try_forward(eval_data.clone())?)?;
+        let predicted_eval =
+            convert_max_outputs_to_category(model.try_forward(eval_data.clone())?)?;
 
-        plot_error_matrix(&eval_labels, &predicted_eval, &['0'; N_OUT], &svg_backend)?;
+        plot_error_matrix(
+            &eval_labels,
+            &predicted_eval,
+            36,
+            &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
+            &svg_backend,
+        )?;
     }
 
     println!("Saving model...");
