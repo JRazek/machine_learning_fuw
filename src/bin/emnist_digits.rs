@@ -14,46 +14,37 @@ use num::FromPrimitive;
 
 use uczenie_maszynowe_fuw::emnist_loader::*;
 use uczenie_maszynowe_fuw::plots::plot_error_matrix;
+use uczenie_maszynowe_fuw::plots::plot_loss_error;
 
 use plotters::prelude::*;
 
-fn eval<M, E, D, const N: usize, const N_IN: usize, const N_OUT: usize>(
-    model: &M,
-    data: Tensor<Rank2<N, N_IN>, E, D>,
-    labels: Tensor<Rank2<N, N_OUT>, E, D>,
-) -> Result<Tensor<Rank0, E, D, OwnedTape<E, D>>, Box<dyn std::error::Error>>
-where
-    E: Dtype,
-    D: Device<E>,
-    M: Module<
-        Tensor<(usize, Const<N_IN>), E, D, OwnedTape<E, D>>,
-        Output = Tensor<(usize, Const<N_OUT>), E, D, OwnedTape<E, D>>,
-    >,
-{
-    let dataset = data.reshape_like(&(N, Const::<N_IN>::default()));
-
-    let outputs = model
-        .forward(dataset.retaped::<OwnedTape<_, _>>())
-        .try_realize::<Rank2<N, N_OUT>>()
-        .unwrap();
-
-    let loss = cross_entropy_with_logits_loss(outputs, labels);
-
-    Ok(loss)
-}
-
 #[derive(Clone, Sequential, Default)]
 struct Model<const N_IN: usize, const N_OUT: usize> {
-    linear1: LinearConstConfig<N_IN, 50>,
+    linear1: LinearConstConfig<N_IN, 128>,
     activation1: Tanh,
-    linear4: LinearConstConfig<50, 100>,
+
+    linear2: LinearConstConfig<128, 128>,
+    activation2: FastGeLU,
+
+    linear3: LinearConstConfig<128, 128>,
+    activation3: FastGeLU,
+
+    linear4: LinearConstConfig<128, 128>,
     activation4: FastGeLU,
-    linear5: LinearConstConfig<100, 20>,
-    activation5: Tanh,
-    linear6: LinearConstConfig<20, 20>,
+
+    linear5: LinearConstConfig<128, 128>,
+    activation5: FastGeLU,
+
+    linear6: LinearConstConfig<128, 128>,
     activation6: FastGeLU,
-    linear7: LinearConstConfig<20, N_OUT>,
-    softmax: Softmax,
+
+    linear7: LinearConstConfig<128, 128>,
+    activation7: FastGeLU,
+
+    linear8: LinearConstConfig<128, 128>,
+    activation8: FastGeLU,
+
+    linear9: LinearConstConfig<128, N_OUT>,
 }
 
 fn load_chunked_mnist_images<'a, const N_IN: usize, E, D>(
@@ -140,7 +131,7 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const BATCH_SIZE: usize = 100;
+    const BATCH_SIZE: usize = 3000;
     const N_OUT: usize = 36;
     const N_IN: usize = 28 * 28;
     const LABELS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -166,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     mnist_train = mnist_train
         .into_iter()
         .filter(|img| img.classification < N_OUT as u8)
-        .take(20000)
+        .take(6000)
         .collect();
     println!("Loaded {} training images", mnist_train.len());
 
@@ -198,10 +189,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rms_prop = RMSprop::new(
         &model,
         RMSpropConfig {
-            lr: 1e-3,
+            lr: 1e-4,
             alpha: 0.9,
             eps: 1e-7,
-            momentum: None,
+            momentum: Some(0.9),
             centered: false,
             weight_decay: Some(WeightDecay::L2(1e-9)),
         },
@@ -211,11 +202,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(0)
         .unwrap();
 
-    for epoch in 0..1000 {
-        let mut loss_epoch = None;
+    let mut losses = Vec::new();
 
+    for epoch in 0..10000 {
         mnist_train.shuffle(&mut rng);
-
         let batch_iter = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_train, BATCH_SIZE);
 
         for (batch, labels) in batch_iter.clone() {
@@ -227,7 +217,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let output = model.try_forward(tensor.retaped::<OwnedTape<_, _>>())?;
 
                 let loss = cross_entropy_with_logits_loss(output, one_hots);
-                loss_epoch = Some(loss.array());
+
+                losses.push(loss.as_vec()[0]);
 
                 let grads = loss.backward();
 
@@ -235,24 +226,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let loss_epoch = loss_epoch.unwrap();
-        println!("Epoch: {}, Loss: {}", epoch, loss_epoch);
-
         model.save_safetensors(model_path)?;
 
         let svg_backend =
-            SVGBackend::new("plots/emnist_digits.svg", (800, 600)).into_drawing_area();
+            SVGBackend::new("plots/emnist_digits.svg", (1200, 600)).into_drawing_area();
 
         let predicted_eval =
             convert_max_outputs_to_category(model.try_forward(eval_data.clone())?)?;
+
+        let accuracy =
+            predicted_eval
+                .iter()
+                .zip(eval_labels.iter())
+                .fold(
+                    0,
+                    |acc, (&predicted, &expected)| {
+                        if predicted == expected {
+                            acc + 1
+                        } else {
+                            acc
+                        }
+                    },
+                ) as f32
+                / eval_labels.len() as f32;
+
+        println!(
+            "Epoch: {}, loss_train: {}, accuracy: {:.2}%",
+            epoch,
+            losses.last().unwrap(),
+            accuracy * 100f32
+        );
+
+        let (left, right) = svg_backend.split_horizontally(600);
 
         plot_error_matrix(
             &eval_labels,
             &predicted_eval,
             36,
             &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
-            &svg_backend,
+            &left,
         )?;
+
+        plot_loss_error(&losses, &right)?;
+
+        svg_backend.present()?;
     }
 
     println!("Saving model...");

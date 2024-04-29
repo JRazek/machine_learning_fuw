@@ -12,8 +12,6 @@ where
     DB: DrawingBackend,
     <DB as DrawingBackend>::ErrorType: 'static,
 {
-    use plotters::prelude::*;
-
     drawing_area.fill(&WHITE)?;
 
     let mut left = ChartBuilder::on(&drawing_area);
@@ -43,9 +41,14 @@ where
             matrix[l as usize][p as usize] += 1.0;
         });
 
+    let max = *matrix
+        .iter()
+        .flatten()
+        .max_by(|&a, &b| a.partial_cmp(b).unwrap())
+        .unwrap();
+
     matrix.iter_mut().for_each(|row| {
-        let sum: f32 = row.iter().sum();
-        row.iter_mut().for_each(|v| *v /= sum);
+        row.iter_mut().for_each(|v| *v /= max);
     });
 
     chart_context_left.draw_series(matrix.iter().enumerate().flat_map(|(label_id, row)| {
@@ -59,6 +62,48 @@ where
             )
         })
     }))?;
+
+    Ok(())
+}
+
+pub fn plot_loss_error<DB>(
+    losses: &[f32],
+    drawing_area: &DrawingArea<DB, Shift>,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    DB: DrawingBackend,
+    <DB as DrawingBackend>::ErrorType: 'static,
+{
+    drawing_area.fill(&WHITE)?;
+
+    let mut drawing_area = ChartBuilder::on(&drawing_area);
+
+    let max_loss = *losses
+        .iter()
+        .max_by(|&a, &b| a.partial_cmp(b).unwrap())
+        .unwrap();
+
+    let mut chart_context_right = drawing_area
+        .caption("Loss", ("Arial", 20))
+        .set_all_label_area_size(70)
+        .margin(50)
+        .build_cartesian_2d(0..losses.len(), (0f32..max_loss).log_scale())?;
+
+    chart_context_right
+        .configure_mesh()
+        .x_labels(10)
+        .x_desc("Iteration")
+        .y_labels(10)
+        .y_desc("Loss")
+        .y_label_formatter(&|y| format!("{:.1e}", y))
+        .draw()?;
+
+    let losses = LineSeries::new(
+        losses.into_iter().enumerate().map(|(i, &l)| (i, l)),
+        BLUE.filled(),
+    );
+
+    chart_context_right.draw_series(losses)?;
 
     Ok(())
 }
