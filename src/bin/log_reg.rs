@@ -1,7 +1,6 @@
 #![feature(array_chunks)]
 #![feature(iter_array_chunks)]
 
-use dfdx::data::Collate;
 use serde::de::{self, Deserialize, Deserializer, Unexpected};
 
 use plotters::prelude::*;

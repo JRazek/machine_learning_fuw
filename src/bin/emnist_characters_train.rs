@@ -42,15 +42,32 @@ struct FullyConnected<const N_IN: usize, const N_OUT: usize> {
 #[derive(Clone, Default, Sequential)]
 struct SubmoduleConvolution {
     conv1: Conv2DConstConfig<1, 10, 3>,
-    g: FastGeLU,
-    conv2: Conv2DConstConfig<10, 10, 3>,
-    t1: Tanh,
-    flatten: Flatten2D,
-    l1: LinearConstConfig<5760, 100>,
     g1: FastGeLU,
-    l2: LinearConstConfig<100, 100>,
+
+    conv2: Conv2DConstConfig<10, 10, 3>,
     g2: FastGeLU,
-    l3: LinearConstConfig<100, 37>,
+
+    conv3: Conv2DConstConfig<10, 10, 5>,
+    g3: FastGeLU,
+
+    conv4: Conv2DConstConfig<10, 10, 5>,
+    g4: FastGeLU,
+
+    flatten: Flatten2D,
+
+    l1: LinearConstConfig<2560, 1280>,
+    t1: Tanh,
+
+    l2: LinearConstConfig<1280, 640>,
+    t2: Tanh,
+
+    l3: LinearConstConfig<640, 320>,
+    t3: Tanh,
+
+    l4: LinearConstConfig<320, 160>,
+    t4: Tanh,
+
+    l5: LinearConstConfig<160, 37>,
 }
 
 #[derive(
@@ -83,6 +100,14 @@ where
     Conv2D<Const<10>, Const<10>, Const<3>, Const<1>, Const<0>, Const<1>, Const<1>, E, D>: Module<
         Tensor<(usize, Const<10>, Const<26>, Const<26>), E, D, TapeT>,
         Output = Tensor<(usize, Const<10>, Const<24>, Const<24>), E, D, TapeT>,
+    >,
+    Conv2D<Const<10>, Const<10>, Const<5>, Const<1>, Const<0>, Const<1>, Const<1>, E, D>: Module<
+        Tensor<(usize, Const<10>, Const<24>, Const<24>), E, D, TapeT>,
+        Output = Tensor<(usize, Const<10>, Const<20>, Const<20>), E, D, TapeT>,
+    >,
+    Conv2D<Const<10>, Const<10>, Const<5>, Const<1>, Const<0>, Const<1>, Const<1>, E, D>: Module<
+        Tensor<(usize, Const<10>, Const<20>, Const<20>), E, D, TapeT>,
+        Output = Tensor<(usize, Const<10>, Const<16>, Const<16>), E, D, TapeT>,
     >,
 {
     type Output = Tensor<(usize, Const<37>), E, D, TapeT>;
@@ -235,8 +260,10 @@ where
 
             let svg_backend = SVGBackend::new(plot_path, (1800, 1000)).into_drawing_area();
 
-            match svg_backend.split_evenly((2, 3)).as_slice() {
-                [error_matrix_area_train, losses_area_train, gradients_area_train, error_matrix_area_test, losses_area_test, ..] =>
+            let (left, gradients_area_train) = svg_backend.split_horizontally(1100);
+
+            match left.split_evenly((2, 2)).as_slice() {
+                [error_matrix_area_train, error_matrix_area_test, losses_area_train, losses_area_test] =>
                 {
                     plot_error_matrix(
                         &train_labels,
@@ -257,7 +284,7 @@ where
                         .collect();
                     plot_log_scale_data(
                         &grad_magnitudes_train,
-                        "gradient norm",
+                        "gradient norm (train)",
                         &gradients_area_train,
                     )?;
 
