@@ -18,7 +18,7 @@ use uczenie_maszynowe_fuw::plots::*;
 
 use plotters::prelude::*;
 
-const LABELS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const LABELS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 
 #[derive(Clone, Sequential, Default)]
 struct Model<const N_IN: usize, const N_OUT: usize> {
@@ -170,7 +170,7 @@ where
                     plot_error_matrix(
                         &eval_labels,
                         &predicted_eval,
-                        36,
+                        N_OUT,
                         &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
                         &error_matrix_area,
                     )?;
@@ -198,17 +198,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const N_IN: usize = 28 * 28;
     const N_OUT: usize = LABELS.len();
 
-    let mnist_path = std::env::args()
+    let mode = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "data/emnist/".to_string());
-
-    let model_path = std::env::args()
-        .nth(2)
-        .unwrap_or_else(|| "models/emnist_characters_model".to_string());
+        .unwrap_or_else(|| "train".to_string());
 
     let dev = AutoDevice::default();
 
     let mut model = dev.build_module::<f32>(Model::<N_IN, N_OUT>::default());
+
+    let model_path = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "models/emnist_characters_model".to_string());
 
     match model.load_safetensors(&model_path) {
         Ok(_) => {
@@ -220,7 +220,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    training_pipeline(&mnist_path, dev, model, &model_path)?;
+    match mode.as_str() {
+        "train" => {
+            let mnist_path = std::env::args()
+                .nth(3)
+                .unwrap_or_else(|| "data/emnist/".to_string());
+
+            training_pipeline(&mnist_path, dev, model, &model_path)?;
+        }
+        "decode" => {
+            let ngz_path = std::env::args()
+                .nth(3)
+                .unwrap_or_else(|| "data/encoded.npz".to_string());
+
+            println!("Decoding: {}", ngz_path);
+            let tensor = load_npz_test::<N_OUT, N_IN, f64, _>(&ngz_path, &dev)?.to_dtype::<f32>();
+
+            let categories = decode_characters_npz(&mut model, tensor)?
+                .into_iter()
+                .map(|idx| LABELS.as_ascii().unwrap()[idx as usize])
+                .collect::<Vec<_>>();
+
+            println!("Categories: {:?}", categories);
+        }
+        _ => println!("Unknown mode: {}", mode),
+    }
 
     Ok(())
 }
