@@ -1,5 +1,6 @@
 #![feature(iter_array_chunks)]
 #![feature(ascii_char)]
+#![feature(generic_const_exprs)]
 
 use dfdx::prelude::*;
 
@@ -19,7 +20,7 @@ use plotters::prelude::*;
 const LABELS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 
 #[derive(Clone, Sequential, Default)]
-struct Model<const N_IN: usize, const N_OUT: usize> {
+struct FullyConnected<const N_IN: usize, const N_OUT: usize> {
     linear1: LinearConstConfig<N_IN, 128>,
     activation1: Tanh,
 
@@ -36,6 +37,67 @@ struct Model<const N_IN: usize, const N_OUT: usize> {
     activation8: Tanh,
 
     linear9: LinearConstConfig<128, N_OUT>,
+}
+
+#[derive(Clone, Default, Sequential)]
+struct SubmoduleConvolution {
+    conv1: Conv2DConstConfig<1, 10, 3>,
+    g: FastGeLU,
+    conv2: Conv2DConstConfig<10, 10, 3>,
+    t1: Tanh,
+    flatten: Flatten2D,
+    l1: LinearConstConfig<5760, 100>,
+    g1: FastGeLU,
+    l2: LinearConstConfig<100, 100>,
+    g2: FastGeLU,
+    l3: LinearConstConfig<100, 37>,
+}
+
+#[derive(
+    Clone,
+    ResetParams,
+    UpdateParams,
+    ZeroGrads,
+    SaveSafeTensors,
+    LoadSafeTensors,
+    CustomModule,
+    Default,
+)]
+#[built(ConvolutionModel)]
+struct ConvolutionModelConfig {
+    #[module]
+    submodule: SubmoduleConvolution,
+}
+
+impl<E, D, TapeT> Module<Tensor<(usize, Const<784>), E, D, TapeT>> for ConvolutionModel<E, D>
+where
+    E: Dtype,
+    D: Device<E>,
+    TapeT: Tape<E, D>,
+
+    //TODO Trzeba by pokombinować jak się tego pozbyć..
+    Conv2D<Const<1>, Const<10>, Const<3>, Const<1>, Const<0>, Const<1>, Const<1>, E, D>: Module<
+        Tensor<(usize, Const<1>, Const<28>, Const<28>), E, D, TapeT>,
+        Output = Tensor<(usize, Const<10>, Const<26>, Const<26>), E, D, TapeT>,
+    >,
+    Conv2D<Const<10>, Const<10>, Const<3>, Const<1>, Const<0>, Const<1>, Const<1>, E, D>: Module<
+        Tensor<(usize, Const<10>, Const<26>, Const<26>), E, D, TapeT>,
+        Output = Tensor<(usize, Const<10>, Const<24>, Const<24>), E, D, TapeT>,
+    >,
+{
+    type Output = Tensor<(usize, Const<37>), E, D, TapeT>;
+
+    fn try_forward(
+        &self,
+        x: Tensor<(usize, Const<784>), E, D, TapeT>,
+    ) -> Result<Self::Output, Error> {
+        let n = x.shape().0;
+        let reshaped = x.try_reshape_like(&(n, Const::<1>, Const::<28>, Const::<28>))?;
+
+        let out = self.submodule.try_forward(reshaped)?;
+
+        Ok(out)
+    }
 }
 
 fn load_npz_test<const N: usize, const N_IN: usize, E, D>(
@@ -79,6 +141,7 @@ fn training_pipeline<const N_IN: usize, const N_OUT: usize, D, E, M>(
     emnist_path: &str,
     dev: D,
     model: M,
+    plot_path: &str,
     model_save_path: impl AsRef<std::path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
@@ -170,8 +233,7 @@ where
                 test_accuracy[0] * 100f32
             );
 
-            let svg_backend =
-                SVGBackend::new("plots/emnist_balanced.svg", (1800, 1000)).into_drawing_area();
+            let svg_backend = SVGBackend::new(plot_path, (1800, 1000)).into_drawing_area();
 
             match svg_backend.split_evenly((2, 3)).as_slice() {
                 [error_matrix_area_train, losses_area_train, gradients_area_train, error_matrix_area_test, losses_area_test, ..] =>
@@ -229,6 +291,9 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[arg(long)]
+    pub nn_type: String,
+
+    #[arg(long)]
     pub mode: String,
 
     #[arg(long)]
@@ -242,18 +307,28 @@ pub struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    match args.nn_type.as_str() {
+        "fully_connected" => run_fully_connected(args)?,
+        "convolution" => run_convolution(args)?,
+        _ => println!("Unknown nn_type: {}", args.nn_type),
+    }
+
+    Ok(())
+}
+
+fn run_fully_connected(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     const N_IN: usize = 28 * 28;
     const N_OUT: usize = LABELS.len();
 
-    let args = Args::parse();
-
     let dev = AutoDevice::default();
 
-    let mut model = dev.build_module::<f32>(Model::<N_IN, N_OUT>::default());
+    let mut model = dev.build_module::<f32>(FullyConnected::<N_IN, N_OUT>::default());
 
     let model_path = args
         .model_path
-        .unwrap_or_else(|| "data/model.npz".to_string());
+        .unwrap_or_else(|| "models/emnist_fully_connected".to_string());
 
     match model.load_safetensors(&model_path) {
         Ok(_) => {
@@ -272,7 +347,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .emnist_path
                 .unwrap_or_else(|| "data/emnist".to_string());
 
-            training_pipeline(&mnist_path, dev, model, &model_path)?;
+            training_pipeline(
+                &mnist_path,
+                dev,
+                model,
+                "plots/emnist_balanced_fully_connected.svg",
+                &model_path,
+            )?;
+        }
+        "decode" => {
+            let ngz_path = args.ngz_path.unwrap_or_else(|| "data/emnist/".to_string());
+
+            println!("Decoding: {}", ngz_path);
+            let tensor = load_npz_test::<N_OUT, N_IN, f64, _>(&ngz_path, &dev)?.to_dtype::<f32>();
+
+            let decoded = decode_characters_npz(&mut model, tensor)?
+                .into_iter()
+                .map(|idx| LABELS.as_ascii().unwrap()[idx as usize])
+                .collect::<Vec<_>>();
+
+            println!("Decoded: {:?}", decoded);
+        }
+        _ => println!("Unknown mode: {}", mode),
+    }
+
+    Ok(())
+}
+
+fn run_convolution(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    const N_IN: usize = 28 * 28;
+    const N_OUT: usize = LABELS.len();
+
+    let dev = AutoDevice::default();
+
+    let mut model = dev.build_module::<f32>(ConvolutionModelConfig::default());
+
+    let model_path = args
+        .model_path
+        .unwrap_or_else(|| "models/emnist_convolution".to_string());
+
+    match model.load_safetensors(&model_path) {
+        Ok(_) => {
+            println!("Model loaded successfully!");
+        }
+        Err(e) => {
+            println!("Error loading model: {:?}", e);
+            println!("Proceeding with randomly initialized model...");
+        }
+    }
+
+    let mode = args.mode;
+    match mode.as_str() {
+        "train" => {
+            let mnist_path = args
+                .emnist_path
+                .unwrap_or_else(|| "data/emnist".to_string());
+
+            training_pipeline::<N_IN, N_OUT, _, _, _>(
+                &mnist_path,
+                dev,
+                model,
+                "plots/emnist_balanced_convolution.svg",
+                &model_path,
+            )?;
         }
         "decode" => {
             let ngz_path = args.ngz_path.unwrap_or_else(|| "data/emnist/".to_string());
