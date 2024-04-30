@@ -161,7 +161,7 @@ where
             );
 
             let svg_backend =
-                SVGBackend::new("plots/emnist_digits.svg", (1800, 600)).into_drawing_area();
+                SVGBackend::new("plots/emnist_balanced.svg", (1800, 600)).into_drawing_area();
 
             match svg_backend.split_evenly((1, 3)).as_slice() {
                 [error_matrix_area, losses_area, gradients_area, ..] => {
@@ -192,21 +192,37 @@ where
     Ok(())
 }
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct Args {
+    #[arg(long)]
+    pub mode: String,
+
+    #[arg(long)]
+    pub model_path: Option<String>,
+
+    #[arg(long)]
+    pub emnist_path: Option<String>,
+
+    #[arg(long)]
+    pub ngz_path: Option<String>,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     const N_IN: usize = 28 * 28;
     const N_OUT: usize = LABELS.len();
 
-    let mode = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "train".to_string());
+    let args = Args::parse();
 
     let dev = AutoDevice::default();
 
     let mut model = dev.build_module::<f32>(Model::<N_IN, N_OUT>::default());
 
-    let model_path = std::env::args()
-        .nth(2)
-        .unwrap_or_else(|| "models/emnist_characters_model".to_string());
+    let model_path = args
+        .model_path
+        .unwrap_or_else(|| "data/model.npz".to_string());
 
     match model.load_safetensors(&model_path) {
         Ok(_) => {
@@ -218,18 +234,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let mode = args.mode;
     match mode.as_str() {
         "train" => {
-            let mnist_path = std::env::args()
-                .nth(3)
-                .unwrap_or_else(|| "data/emnist/".to_string());
+            let mnist_path = args
+                .emnist_path
+                .unwrap_or_else(|| "data/emnist".to_string());
 
             training_pipeline(&mnist_path, dev, model, &model_path)?;
         }
         "decode" => {
-            let ngz_path = std::env::args()
-                .nth(3)
-                .unwrap_or_else(|| "data/encoded.npz".to_string());
+            let ngz_path = args.ngz_path.unwrap_or_else(|| "data/emnist/".to_string());
 
             println!("Decoding: {}", ngz_path);
             let tensor = load_npz_test::<N_OUT, N_IN, f64, _>(&ngz_path, &dev)?.to_dtype::<f32>();
