@@ -139,11 +139,17 @@ pub struct TrainSetup<E> {
 #[derive(Debug, Clone)]
 pub struct EpochData<E> {
     pub epoch: usize,
-    pub losses: Vec<E>,
     pub grad_magnitudes: Vec<E>,
-    pub predicted_eval: Vec<u8>,
-    pub eval_labels: Vec<u8>,
-    pub accuracy: f32,
+
+    pub train_losses: Vec<E>,
+    pub train_predicted: Vec<u8>,
+    pub train_labels: Vec<u8>,
+    pub train_accuracies: Vec<f32>,
+
+    pub test_losses: Vec<E>,
+    pub test_predicted: Vec<u8>,
+    pub test_labels: Vec<u8>,
+    pub test_accuracies: Vec<f32>,
 }
 
 pub fn train<const N_IN: usize, const N_OUT: usize, const BATCH_SIZE: usize, D, E, M, F>(
@@ -186,31 +192,57 @@ where
         },
     );
 
+    const EVAL_CHUNK_SIZE: usize = 1000;
     let (eval_data, eval_labels) =
-        load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_test, mnist_test.len())
+        load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_test, EVAL_CHUNK_SIZE)
             .nth(0)
             .unwrap();
-    let eval_data = eval_data.realize();
 
     let mut grad_magnitudes = Vec::new();
+
+    let accuracy_fn = |predicted: &[u8], expected: &[u8]| {
+        predicted
+            .iter()
+            .zip(expected.iter())
+            .fold(
+                0,
+                |acc, (&predicted, &expected)| {
+                    if predicted == expected {
+                        acc + 1
+                    } else {
+                        acc
+                    }
+                },
+            ) as f32
+            / expected.len() as f32
+    };
 
     for epoch in 0..10000 {
         mnist_train.shuffle(&mut rng);
         let batch_iter = load_chunked_mnist_images::<N_IN, _, _>(&dev, &mnist_train, BATCH_SIZE);
 
-        let mut losses = Vec::new();
-        for (batch, labels) in batch_iter.clone() {
+        let mut train_losses = Vec::new();
+        let mut train_accuracies = Vec::new();
+
+        let mut train_predicted = Vec::new();
+        let mut train_labels = Vec::new();
+
+        for (i, (batch, labels)) in batch_iter.clone().enumerate() {
             assert_eq!(labels.len(), BATCH_SIZE);
 
             let one_hots = make_one_hots::<BATCH_SIZE, N_OUT, _, _>(&dev, &labels)?.realize();
 
             let output = model.try_forward(batch.retaped::<OwnedTape<_, _>>())?;
 
-            let loss = cross_entropy_with_logits_loss(output, one_hots);
+            let predicted = convert_max_outputs_to_category(output.retaped())?;
+            let accuracy = accuracy_fn(&predicted, &labels);
+            train_accuracies.push(accuracy);
 
-            losses.push(loss.as_vec()[0]);
+            let train_loss = cross_entropy_with_logits_loss(output, one_hots);
 
-            let grads = loss.backward();
+            train_losses.push(train_loss.as_vec()[0]);
+
+            let grads = train_loss.backward();
             let tensor_grad_magnitude = grads
                 .get(&batch)
                 .select(dev.tensor(0))
@@ -220,34 +252,37 @@ where
             grad_magnitudes.push(tensor_grad_magnitude.as_vec()[0]);
 
             rms_prop.update(&mut model, &grads)?;
+
+            if i == 0 {
+                train_predicted = predicted.clone();
+                train_labels = labels.clone();
+            }
         }
 
-        let predicted_eval =
-            convert_max_outputs_to_category(model.try_forward(eval_data.clone())?)?;
+        let test_output = model.try_forward(eval_data.clone())?;
 
-        let accuracy =
-            predicted_eval
-                .iter()
-                .zip(eval_labels.iter())
-                .fold(
-                    0,
-                    |acc, (&predicted, &expected)| {
-                        if predicted == expected {
-                            acc + 1
-                        } else {
-                            acc
-                        }
-                    },
-                ) as f32
-                / eval_labels.len() as f32;
+        let predicted_eval = convert_max_outputs_to_category(test_output.clone())?;
+        let test_loss = cross_entropy_with_logits_loss(
+            test_output,
+            make_one_hots::<EVAL_CHUNK_SIZE, N_OUT, _, _>(&dev, &eval_labels)?.realize(),
+        )
+        .as_vec()[0];
+
+        let test_accuracies = accuracy_fn(&predicted_eval, &eval_labels);
 
         let epoch_data = EpochData {
             epoch,
-            losses,
             grad_magnitudes: grad_magnitudes.clone(),
-            predicted_eval,
-            eval_labels: eval_labels.clone(),
-            accuracy,
+
+            train_losses,
+            train_predicted,
+            train_labels,
+            train_accuracies,
+
+            test_predicted: predicted_eval,
+            test_labels: eval_labels.clone(),
+            test_losses: vec![test_loss],
+            test_accuracies: vec![test_accuracies],
         };
 
         epoch_callback(&model, epoch_data)?;

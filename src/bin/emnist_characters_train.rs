@@ -132,8 +132,10 @@ where
         rng,
     };
 
-    let mut losses_all = Vec::new();
-    let mut grad_magnitudes_all = Vec::new();
+    let mut train_losses_all = Vec::new();
+    let mut grad_magnitudes_all_train = Vec::new();
+
+    let mut test_losses_all = Vec::new();
 
     train::<N_IN, N_OUT, 3000, _, _, _, _>(
         dev,
@@ -142,43 +144,72 @@ where
         |model,
          EpochData {
              epoch,
-             losses,
+             train_losses,
+             train_predicted,
+             train_labels,
+             train_accuracies,
+
              grad_magnitudes,
-             predicted_eval,
-             eval_labels,
-             accuracy,
+             test_predicted,
+             test_labels,
+             test_accuracies: test_accuracy,
+             test_losses,
          }| {
-            losses_all.extend_from_slice(&losses);
-            grad_magnitudes_all.extend_from_slice(&grad_magnitudes);
+            train_losses_all.extend_from_slice(&train_losses);
+            grad_magnitudes_all_train.extend_from_slice(&grad_magnitudes);
+
+            test_losses_all.extend_from_slice(&test_losses);
 
             model.save_safetensors(model_save_path.as_ref())?;
 
             println!(
-                "Epoch: {}, loss_train: {}, accuracy: {:.2}%",
+                "Epoch: {}, loss_train: {}, accuracy_train: {:.2}%, accuracy_test: {:.2}%",
                 epoch,
-                losses.last().unwrap(),
-                accuracy * 100f32
+                train_losses.last().unwrap(),
+                train_accuracies[0] * 100f32,
+                test_accuracy[0] * 100f32
             );
 
             let svg_backend =
-                SVGBackend::new("plots/emnist_balanced.svg", (1800, 600)).into_drawing_area();
+                SVGBackend::new("plots/emnist_balanced.svg", (1800, 1000)).into_drawing_area();
 
-            match svg_backend.split_evenly((1, 3)).as_slice() {
-                [error_matrix_area, losses_area, gradients_area, ..] => {
+            match svg_backend.split_evenly((2, 3)).as_slice() {
+                [error_matrix_area_train, losses_area_train, gradients_area_train, error_matrix_area_test, losses_area_test, ..] =>
+                {
                     plot_error_matrix(
-                        &eval_labels,
-                        &predicted_eval,
+                        &train_labels,
+                        &train_predicted,
                         N_OUT,
                         &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
-                        &error_matrix_area,
+                        "train",
+                        &error_matrix_area_train,
                     )?;
 
-                    let losses: Vec<f32> = losses_all.iter().map(|&x| x.into()).collect();
-                    plot_log_scale_data(&losses, "loss train", &losses_area)?;
+                    let losses_train: Vec<f32> =
+                        train_losses_all.iter().map(|&x| x.into()).collect();
+                    plot_log_scale_data(&losses_train, "loss train", &losses_area_train)?;
 
-                    let grad_magnitudes: Vec<f32> =
-                        grad_magnitudes_all.iter().map(|&x| x.into()).collect();
-                    plot_log_scale_data(&grad_magnitudes, "gradient norm", &gradients_area)?;
+                    let grad_magnitudes_train: Vec<f32> = grad_magnitudes_all_train
+                        .iter()
+                        .map(|&x| x.into())
+                        .collect();
+                    plot_log_scale_data(
+                        &grad_magnitudes_train,
+                        "gradient norm",
+                        &gradients_area_train,
+                    )?;
+
+                    plot_error_matrix(
+                        &test_labels,
+                        &test_predicted,
+                        N_OUT,
+                        &|idx| LABELS.as_ascii().unwrap()[idx].to_string(),
+                        "test",
+                        &error_matrix_area_test,
+                    )?;
+
+                    let test_losses: Vec<f32> = test_losses_all.iter().map(|&x| x.into()).collect();
+                    plot_log_scale_data(&test_losses, "loss test", &losses_area_test)?;
                 }
                 _ => panic!(),
             }

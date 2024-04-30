@@ -6,6 +6,7 @@ pub fn plot_error_matrix<DB>(
     predictions: &[u8],
     cat_cnt: usize,
     category_formatter: &impl Fn(usize) -> String,
+    caption: &str,
     drawing_area: &DrawingArea<DB, Shift>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
@@ -17,6 +18,7 @@ where
     let mut left = ChartBuilder::on(&drawing_area);
 
     let mut chart_context_left = left
+        .caption(caption, ("Arial", 20))
         .set_all_label_area_size(50)
         .margin(50)
         .build_cartesian_2d(
