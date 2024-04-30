@@ -337,7 +337,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     match args.nn_type.as_str() {
-        "fully_connected" => run_fully_connected(args)?,
+        "fc" => run_fully_connected(args)?,
         "convolution" => run_convolution(args)?,
         _ => println!("Unknown nn_type: {}", args.nn_type),
     }
