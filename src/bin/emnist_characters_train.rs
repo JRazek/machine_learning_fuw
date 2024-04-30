@@ -6,8 +6,6 @@ use dfdx::prelude::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-use std::path::Path;
-
 use rand::seq::SliceRandom;
 
 use num::FromPrimitive;
@@ -236,12 +234,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Decoding: {}", ngz_path);
             let tensor = load_npz_test::<N_OUT, N_IN, f64, _>(&ngz_path, &dev)?.to_dtype::<f32>();
 
-            let categories = decode_characters_npz(&mut model, tensor)?
+            let decoded = decode_characters_npz(&mut model, tensor)?
                 .into_iter()
                 .map(|idx| LABELS.as_ascii().unwrap()[idx as usize])
                 .collect::<Vec<_>>();
 
-            println!("Categories: {:?}", categories);
+            println!("Decoded: {:?}", decoded);
         }
         _ => println!("Unknown mode: {}", mode),
     }

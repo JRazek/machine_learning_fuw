@@ -44,7 +44,7 @@ impl MnistData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MnistImage<T> {
     pub image: Array2<T>,
     pub classification: u8,
@@ -79,12 +79,26 @@ where
 
     let mut ret: Vec<MnistImage<T>> = Vec::new();
 
-    for (image, classification) in images.into_iter().zip(classifications.into_iter()) {
+    for (image, classification) in images
+        .into_iter()
+        .zip(classifications.into_iter())
+        .filter(|(_, classification)| *classification < 36)
+    {
         ret.push(MnistImage {
             image,
             classification,
         })
     }
+
+    let empty_token = vec![
+        MnistImage {
+            image: Array2::zeros((image_shape, 1)),
+            classification: 36,
+        };
+        50
+    ];
+
+    ret.extend(empty_token.into_iter());
 
     Ok(ret)
 }

@@ -1,18 +1,12 @@
 use dfdx::prelude::*;
 
 use rand::rngs::StdRng;
-use rand::SeedableRng;
-
-use std::path::Path;
 
 use rand::seq::SliceRandom;
 
 use num::FromPrimitive;
 
 use crate::emnist_loader::*;
-use crate::plots::*;
-
-use plotters::prelude::*;
 
 pub fn load_chunked_mnist_images<'a, const N_IN: usize, E, D>(
     dev: &'a D,
