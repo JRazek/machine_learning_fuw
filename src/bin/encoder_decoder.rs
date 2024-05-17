@@ -29,10 +29,15 @@ pub struct Encoder {
     conv_tanh6: FastGeLU,
 
     conv7: Conv2DConstConfig<128, 128, 3, 2, 1>, //32x32 -> 16x16
+    conv_tanh7: FastGeLU,
+
+    conv8: Conv2DConstConfig<128, 128, 3, 2, 1>, //16x16 -> 8x8
 }
 
 #[derive(Default, Clone, Debug, Sequential)]
 pub struct Decoder {
+    conv8: ConvTrans2DConstConfig<128, 128, 3, 2, 1>, //8
+
     trans_conv_7: ConvTrans2DConstConfig<128, 128, 4, 2, 1>, //16x16 -> 32x32
 
     trans_conv_tanh6: FastGeLU,
@@ -181,7 +186,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &encoder_decoder,
         SgdConfig {
             momentum: None,
-            lr: 1e-3,
+            lr: 1e-4,
             weight_decay: Some(WeightDecay::L2(1e-2)),
         },
     );
