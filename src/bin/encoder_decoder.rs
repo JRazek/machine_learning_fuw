@@ -38,6 +38,7 @@ pub struct Encoder {
 pub struct Decoder {
     conv8: ConvTrans2DConstConfig<128, 128, 3, 2, 1>, //8
 
+    conv_tanh8: FastGeLU,
     trans_conv_7: ConvTrans2DConstConfig<128, 128, 4, 2, 1>, //16x16 -> 32x32
 
     trans_conv_tanh6: FastGeLU,
@@ -89,9 +90,14 @@ fn generate_disk<const N: usize, const M: usize>(
     disk
 }
 
+struct Circle {
+    center: (u32, u32),
+    radius: u32,
+}
+
 fn disk_generator<const N: usize, const M: usize>(
     seed: u64,
-) -> impl Iterator<Item = ndarray::Array2<f32>> {
+) -> impl Iterator<Item = (ndarray::Array2<f32>, Circle)> {
     let mut rng = StdRng::seed_from_u64(seed);
 
     let max_r = std::cmp::min(N, M) as u32 / 2;
@@ -114,7 +120,13 @@ fn disk_generator<const N: usize, const M: usize>(
         assert!(x >= r);
         assert!(y >= r);
 
-        generate_disk::<N, M>((x, y), r)
+        (
+            generate_disk::<N, M>((x, y), r),
+            Circle {
+                center: (x, y),
+                radius: r,
+            },
+        )
     })
 }
 
@@ -163,10 +175,10 @@ where
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const N: usize = 256;
-    const M: usize = 256;
+const N: usize = 256;
+const M: usize = 256;
 
+fn train_encoder_decoder() -> Result<(), Box<dyn std::error::Error>> {
     let dev = AutoDevice::default();
 
     let mut encoder_decoder = dev.build_module::<f32>(EncoderDecoder::default());
@@ -186,7 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &encoder_decoder,
         SgdConfig {
             momentum: None,
-            lr: 1e-4,
+            lr: 1e-3,
             weight_decay: Some(WeightDecay::L2(1e-2)),
         },
     );
@@ -196,7 +208,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for epoch in 0..N_EPOCHS {
         let disks = ndarray::Array3::from_shape_vec(
             (BATCH, N, M),
-            (&mut generator).take(BATCH).flatten().collect(),
+            (&mut generator)
+                .map(|(img, _)| img)
+                .take(BATCH)
+                .flatten()
+                .collect(),
         )?;
 
         let disks_tensor: Tensor<Rank4<BATCH, 1, N, M>, _, _> =
@@ -241,6 +257,151 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             svg.present()?;
         }
     }
+
+    Ok(())
+}
+
+#[derive(Default, Clone, Debug, Sequential)]
+struct CircleGenerator<const BATCH: usize> {
+    linear1: LinearConstConfig<3, 256>,
+    tanh1: Tanh,
+
+    linear3: LinearConstConfig<256, 256>,
+    tanh3: Tanh,
+
+    linear4: LinearConstConfig<256, 512>,
+    tanh4: Tanh,
+
+    linear5: LinearConstConfig<512, 1024>,
+    tanh5: Tanh,
+
+    linear6: LinearConstConfig<1024, 65536>,
+
+    reshape: Reshape<Rank4<BATCH, 1, 256, 256>>,
+}
+
+fn train_fully_connected_generator() -> Result<(), Box<dyn std::error::Error>> {
+    let dev = AutoDevice::default();
+
+    let mut network = dev.build_module::<f32>(CircleGenerator::default());
+
+    match network.load_safetensors("models/circle_generator_fully_connected.pt") {
+        Ok(_) => println!("Model loaded successfully"),
+        Err(e) => {
+            println!("Error loading model: {:?}", e);
+            println!("proceeding with random initialization");
+        }
+    }
+
+    const BATCH: usize = 20;
+    let mut generator = disk_generator::<N, M>(0);
+
+    let mut sgd = Sgd::new(
+        &network,
+        SgdConfig {
+            momentum: None,
+            lr: 1e-3,
+            weight_decay: Some(WeightDecay::L2(1e-2)),
+        },
+    );
+
+    let mut losses = Vec::new();
+    const N_EPOCHS: usize = 1000000;
+    for epoch in 0..N_EPOCHS {
+        let batch = (&mut generator).take(BATCH).collect::<Vec<_>>();
+
+        let input: Vec<_> = batch
+            .iter()
+            .flat_map(
+                |(
+                    _,
+                    Circle {
+                        center: (x, y),
+                        radius,
+                    },
+                )| [*x as f32, *y as f32, *radius as f32],
+            )
+            .collect();
+
+        let input_dev: Tensor<Rank2<BATCH, 3>, _, _> = dev.tensor_from_vec(input, Rank2::default());
+
+        let target_host = ndarray::Array4::from_shape_vec(
+            (BATCH, 1, N, M),
+            batch
+                .into_iter()
+                .flat_map(|(disk, _)| disk)
+                .collect::<Vec<_>>(),
+        )?;
+
+        let target_dev: Tensor<Rank4<BATCH, 1, N, M>, _, _> =
+            dev.tensor_from_vec(target_host.clone().into_raw_vec(), Rank4::default());
+
+        let output: Tensor<Rank4<BATCH, 1, N, M>, _, _, OwnedTape<_, _>> =
+            network.forward(input_dev.retaped());
+
+        let output_none_tape = output.retaped::<NoneTape>();
+
+        let loss = cross_entropy_with_logits_loss(output, target_dev);
+
+        let loss_val = loss.as_vec()[0];
+
+        dbg!(loss_val);
+
+        let grads = loss.backward();
+
+        sgd.update(&mut network, &grads)?;
+
+        losses.push(loss_val);
+
+        if (epoch + 1) % 100 == 0 {
+            if (epoch + 1) % 1000 == 0 {
+                network.save_safetensors("models/circle_generator_fully_connected.pt")?;
+            }
+
+            let input_array = target_host
+                .index_axis_move(ndarray::Axis(0), 0)
+                .index_axis_move(ndarray::Axis(0), 0)
+                .into_shape((N, M))?; //acts as an assert
+
+            let output_array =
+                ndarray::Array4::from_shape_vec((BATCH, 1, N, M), output_none_tape.as_vec())
+                    .unwrap()
+                    .index_axis_move(ndarray::Axis(0), 0)
+                    .index_axis_move(ndarray::Axis(0), 0)
+                    .into_shape((N, M))?; //acts as an assert
+
+            let svg =
+                SVGBackend::new("plots/disk_plot_generated.svg", (1800, 600)).into_drawing_area();
+            let (reference, right) = svg.split_horizontally(600);
+            let (generated, loss_plot) = right.split_horizontally(600);
+
+            plot_circle::<_, N, M>(input_array.view(), "disk", &reference)?;
+            plot_circle::<_, N, M>(output_array.view(), "output", &generated)?;
+            uczenie_maszynowe_fuw::plots::plot_log_scale_data(&losses, "loss", &loss_plot)?;
+            svg.present()?;
+        }
+    }
+
+    Ok(())
+}
+
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Params {
+    #[arg(long, default_value = "train", required = true)]
+    mode: String,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let params = Params::parse();
+
+    match params.mode.as_str() {
+        "fully_connected" => train_fully_connected_generator()?,
+        "encoder_decoder" => train_encoder_decoder()?,
+        _ => panic!("Unknown mode"),
+    };
 
     Ok(())
 }

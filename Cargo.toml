@@ -27,6 +27,9 @@ name = "equal_distance_model"
 [[bin]]
 name = "emnist_characters_train"
 
+[[bin]]
+name = "encoder_decoder"
+
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"], rev = "4722a99" }
 plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "bitmap_backend", "errorbar", "line_series", "histogram", "point_series"] }
