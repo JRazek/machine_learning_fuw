@@ -10,37 +10,53 @@ use plotters::prelude::*;
 
 #[derive(Default, Clone, Copy, Debug, Sequential)]
 pub struct Encoder {
-    flatten: Flatten2D,
-    linear1: LinearConstConfig<1024, 100>,
-    lin_gelu1: Sigmoid,
+    conv1: Conv2DConstConfig<1, 16, 3>, //256x256 -> 254x254
+    conv_tanh1: Tanh,
 
-    linear2: LinearConstConfig<100, 100>,
-    lin_gelu2: Sigmoid,
+    conv2: Conv2DConstConfig<16, 32, 3>, //254x254 -> 252x252
+    conv_tanh2: Tanh,
 
-    linear3: LinearConstConfig<100, 100>,
-    lin_gelu3: Sigmoid,
+    conv3: Conv2DConstConfig<32, 64, 5>, //252x252 -> 248x248
+    conv_tanh3: Tanh,
 
-    linear4: LinearConstConfig<100, 4>,
+    conv4: Conv2DConstConfig<64, 64, 5, 3>, //248x248 -> 82x82
+    conv_tanh4: Tanh,
+
+    conv5: Conv2DConstConfig<64, 64, 5, 3>, //82x82 -> 26x26
+    conv_tanh5: Tanh,
+
+    conv6: Conv2DConstConfig<64, 64, 5, 3>, //26x26 -> 8x8
+    conv_tanh6: Tanh,
+
+    conv7: Conv2DConstConfig<64, 1, 1>, //26x26 -> 8x8
 }
 
 #[derive(Default, Clone, Copy, Debug, Sequential)]
-pub struct Decoder<const BATCH: usize> {
-    linear1: LinearConstConfig<4, 100>,
-    lin_gelu1: Sigmoid,
+pub struct Decoder {
+    trans_conv7: ConvTrans2DConstConfig<1, 64, 1>, //8x8 -> 26x26
 
-    linear2: LinearConstConfig<100, 100>,
-    lin_gelu2: Sigmoid,
+    conv_tanh6: Tanh,
+    trans_conv6: ConvTrans2DConstConfig<64, 64, 5, 3>, //26x26 -> 82x82
 
-    linear3: LinearConstConfig<100, 100>,
-    lin_gelu3: Sigmoid,
+    conv_taanh5: Tanh,
+    trans_conv5: ConvTrans2DConstConfig<64, 64, 5, 3>, //82x82 -> 248x248
 
-    linear4: LinearConstConfig<100, 1024>,
+    conv_tanh4: Tanh,
+    trans_conv4: ConvTrans2DConstConfig<64, 64, 5, 3>,
+
+    conv_tanh3: Tanh,
+    trans_conv3: ConvTrans2DConstConfig<64, 32, 5>,
+
+    conv_tanh2: Tanh,
+    trans_conv2: ConvTrans2DConstConfig<32, 16, 3>,
+
+    trans_conv_1: ConvTrans2DConstConfig<16, 1, 3>,
 }
 
 #[derive(Default, Clone, Copy, Debug, Sequential)]
-struct EncoderDecoder<const BATCH: usize> {
+struct EncoderDecoder {
     encoder: Encoder,
-    decoder: Decoder<BATCH>,
+    decoder: Decoder,
 }
 
 fn generate_disk<const N: usize, const M: usize>(
@@ -140,12 +156,12 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const N: usize = 32;
-    const M: usize = 32;
+    const N: usize = 256;
+    const M: usize = 256;
 
     let dev = AutoDevice::default();
 
-    let mut encoder_decoder = dev.build_module::<f32>(EncoderDecoder::<BATCH>::default());
+    let mut encoder_decoder = dev.build_module::<f32>(EncoderDecoder::default());
 
     match encoder_decoder.load_safetensors("models/encoder_decoder.pt") {
         Ok(_) => println!("Model loaded successfully"),
@@ -155,7 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    const BATCH: usize = 100;
+    const BATCH: usize = 1;
     let mut generator = disk_generator::<N, M>(0);
 
     let mut sgd = Sgd::new(
@@ -168,18 +184,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut losses = Vec::new();
-    let disks = ndarray::Array3::from_shape_vec(
-        (BATCH, N, M),
-        (&mut generator).take(BATCH).flatten().collect(),
-    )?;
-
     const N_EPOCHS: usize = 1000000;
     for epoch in 0..N_EPOCHS {
+        let disks = ndarray::Array3::from_shape_vec(
+            (BATCH, N, M),
+            (&mut generator).take(BATCH).flatten().collect(),
+        )?;
+
         let disks_tensor: Tensor<Rank4<BATCH, 1, N, M>, _, _> =
             dev.tensor_from_vec(disks.clone().into_raw_vec(), Rank4::default());
 
         let output: Tensor<Rank4<BATCH, 1, N, M>, _, _, OwnedTape<_, _>> =
-            encoder_decoder.forward(disks_tensor.retaped()).reshape();
+            encoder_decoder.forward(disks_tensor.retaped());
 
         let output_none_tape = output.retaped::<NoneTape>();
 
@@ -195,9 +211,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         dbg!(loss_val);
 
-        if epoch % 100 == 0 {
-            losses.push(loss_val);
+        losses.push(loss_val);
 
+        if (epoch + 1) % 100 == 0 {
             encoder_decoder.save_safetensors("models/encoder_decoder.pt")?;
 
             let output_array =
