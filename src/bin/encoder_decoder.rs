@@ -8,54 +8,57 @@ use rand::prelude::*;
 
 use plotters::prelude::*;
 
-#[derive(Default, Clone, Copy, Debug, Sequential)]
+#[derive(Default, Clone, Debug, Sequential)]
 pub struct Encoder {
-    conv1: Conv2DConstConfig<1, 16, 3>, //256x256 -> 254x254
+    conv1: Conv2DConstConfig<1, 16, 3, 1, 1>, //256x256 -> 256x256
     conv_tanh1: Tanh,
 
-    conv2: Conv2DConstConfig<16, 32, 3>, //254x254 -> 252x252
+    conv2: Conv2DConstConfig<16, 32, 3, 1, 1>, //256x256 -> 256x256
     conv_tanh2: Tanh,
 
-    conv3: Conv2DConstConfig<32, 64, 5>, //252x252 -> 248x248
+    conv3: Conv2DConstConfig<32, 32, 5, 1, 2>, //256x256 -> 256x256
     conv_tanh3: Tanh,
 
-    conv4: Conv2DConstConfig<64, 64, 5, 3>, //248x248 -> 82x82
+    conv4: Conv2DConstConfig<32, 64, 5, 1, 2>, //256x256 -> 256x256
     conv_tanh4: Tanh,
 
-    conv5: Conv2DConstConfig<64, 64, 5, 3>, //82x82 -> 26x26
-    conv_tanh5: Tanh,
+    conv5: Conv2DConstConfig<64, 128, 3, 4, 2>, //256x256 -> 64x64
+    conv_tanh5: FastGeLU,
 
-    conv6: Conv2DConstConfig<64, 64, 5, 3>, //26x26 -> 8x8
-    conv_tanh6: Tanh,
+    conv6: Conv2DConstConfig<128, 128, 3, 2, 2>, //64x64 -> 32x32
+    conv_tanh6: FastGeLU,
 
-    conv7: Conv2DConstConfig<64, 1, 1>, //26x26 -> 8x8
+    conv7: Conv2DConstConfig<128, 128, 3, 2, 1>, //32x32 -> 16x16
 }
 
-#[derive(Default, Clone, Copy, Debug, Sequential)]
+#[derive(Default, Clone, Debug, Sequential)]
 pub struct Decoder {
-    trans_conv7: ConvTrans2DConstConfig<1, 64, 1>, //8x8 -> 26x26
+    trans_conv_7: ConvTrans2DConstConfig<128, 128, 4, 2, 1>, //16x16 -> 32x32
 
-    conv_tanh6: Tanh,
-    trans_conv6: ConvTrans2DConstConfig<64, 64, 5, 3>, //26x26 -> 82x82
+    trans_conv_tanh6: FastGeLU,
+    trans_conv_6: ConvTrans2DConstConfig<128, 128, 3, 2, 2>, //32x32 -> 64x64
 
-    conv_taanh5: Tanh,
-    trans_conv5: ConvTrans2DConstConfig<64, 64, 5, 3>, //82x82 -> 248x248
+    trans_conv_tanh5: FastGeLU,
+    trans_conv_5: ConvTrans2DConstConfig<128, 64, 4, 4, 2>, //64x64 -> 256x256
 
-    conv_tanh4: Tanh,
-    trans_conv4: ConvTrans2DConstConfig<64, 64, 5, 3>,
+    trans_conv_tanh4: Tanh,
+    trans_conv_4: ConvTrans2DConstConfig<64, 32, 5, 1, 2>, //256x256 -> 256x256
 
-    conv_tanh3: Tanh,
-    trans_conv3: ConvTrans2DConstConfig<64, 32, 5>,
+    trans_conv_tanh3: Tanh,
+    trans_conv_3: ConvTrans2DConstConfig<32, 32, 5, 1, 2>, //256x256 -> 256x256
 
-    conv_tanh2: Tanh,
-    trans_conv2: ConvTrans2DConstConfig<32, 16, 3>,
+    trans_conv_2: Tanh,
+    trans_conv_tanh2: ConvTrans2DConstConfig<32, 16, 3, 1, 1>, //256x256 -> 256x256
 
-    trans_conv_1: ConvTrans2DConstConfig<16, 1, 3>,
+    trans_conv_1: ConvTrans2DConstConfig<16, 1, 3, 1, 1>,
 }
 
-#[derive(Default, Clone, Copy, Debug, Sequential)]
+#[derive(Default, Clone, Debug, Sequential)]
 struct EncoderDecoder {
     encoder: Encoder,
+
+    tanh: Tanh,
+
     decoder: Decoder,
 }
 
@@ -72,7 +75,7 @@ fn generate_disk<const N: usize, const M: usize>(
         for j in 0..M {
             let distance_sq = (i as i32 - y).pow(2) + (j as i32 - x).pow(2);
 
-            if distance_sq < n_radius.pow(2) {
+            if distance_sq <= n_radius.pow(2) {
                 disk[[i, j]] = 1.0;
             }
         }
@@ -90,9 +93,9 @@ fn disk_generator<const N: usize, const M: usize>(
 
     use rand_distr::Uniform;
 
-    assert!(max_r > 2);
+    assert!(max_r > 3);
 
-    let r_dist = Uniform::new(2, max_r);
+    let r_dist = Uniform::new(3, max_r);
 
     (0..).map(move |_| {
         let r = r_dist.sample(&mut rng);
@@ -171,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    const BATCH: usize = 1;
+    const BATCH: usize = 2;
     let mut generator = disk_generator::<N, M>(0);
 
     let mut sgd = Sgd::new(
