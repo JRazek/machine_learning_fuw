@@ -204,8 +204,8 @@ fn train_encoder_decoder() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut losses = Vec::new();
-    const N_EPOCHS: usize = 1000000;
-    for epoch in 0..N_EPOCHS {
+    const N_BATCHES: usize = 1000000;
+    for batch_i in 0..N_BATCHES {
         let disks = ndarray::Array3::from_shape_vec(
             (BATCH, N, M),
             (&mut generator)
@@ -227,7 +227,7 @@ fn train_encoder_decoder() -> Result<(), Box<dyn std::error::Error>> {
 
         let loss_val = loss.as_vec()[0];
 
-        println!("epoch: {}, loss: {:+e}", epoch, loss_val);
+        println!("batch: {}, loss: {:+e}", batch_i, loss_val);
 
         let grads = loss.backward();
 
@@ -237,7 +237,7 @@ fn train_encoder_decoder() -> Result<(), Box<dyn std::error::Error>> {
 
         losses.push(loss_val);
 
-        if (epoch + 1) % 100 == 0 {
+        if (batch_i + 1) % 100 == 0 {
             encoder_decoder.save_safetensors("models/encoder_decoder.pt")?;
 
             let output_array =
@@ -307,8 +307,8 @@ fn train_fully_connected_generator() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut losses = Vec::new();
-    const N_EPOCHS: usize = 1000000;
-    for epoch in 0..N_EPOCHS {
+    const N_BATCHES: usize = 1000000;
+    for batch_i in 0..N_BATCHES {
         let batch = (&mut generator).take(BATCH).collect::<Vec<_>>();
 
         let input: Vec<_> = batch
@@ -346,6 +346,8 @@ fn train_fully_connected_generator() -> Result<(), Box<dyn std::error::Error>> {
 
         let loss_val = loss.as_vec()[0];
 
+        println!("batch: {}, loss: {:+e}", batch_i, loss_val);
+
         dbg!(loss_val);
 
         let grads = loss.backward();
@@ -354,8 +356,8 @@ fn train_fully_connected_generator() -> Result<(), Box<dyn std::error::Error>> {
 
         losses.push(loss_val);
 
-        if (epoch + 1) % 100 == 0 {
-            if (epoch + 1) % 1000 == 0 {
+        if (batch_i + 1) % 100 == 0 {
+            if (batch_i + 1) % 1000 == 0 {
                 network.save_safetensors("models/circle_generator_fully_connected.pt")?;
             }
 
