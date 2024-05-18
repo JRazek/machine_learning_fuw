@@ -390,7 +390,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Params {
-    #[arg(long, default_value = "train", required = true)]
+    #[arg(long, required = true)]
     mode: String,
 }
 
