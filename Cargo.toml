@@ -30,6 +30,9 @@ name = "emnist_characters_train"
 [[bin]]
 name = "encoder_decoder"
 
+[[bin]]
+name = "data_streams"
+
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"], rev = "4722a99" }
 plotters = { version = "0.3.5", default_features = false, features = ["svg_backend", "bitmap_backend", "errorbar", "line_series", "histogram", "point_series"] }
@@ -47,6 +50,7 @@ flate2 = "1.0.29"
 num = "0.4.2"
 npyz = "0.8.3"
 clap = { version = "4.5.4", features = ["derive"] }
+regex = "1.10.4"
 
 [features]
 cuda = ["dfdx/cuda"]
