@@ -16,7 +16,7 @@ fn filter_wksf_dataset<'a>(dataset: &str) -> String {
 
     let dataset = citations_reg.replace_all(&dataset, "");
 
-    let sources_reg = regex::Regex::new(r"\d{4}~[^~]+~[^~]+~[^~]+~.*").unwrap();
+    let sources_reg = regex::Regex::new(r"\d{4}~[^~]+.*").unwrap();
 
     let dataset = sources_reg.replace_all(&dataset, "");
 
@@ -25,6 +25,8 @@ fn filter_wksf_dataset<'a>(dataset: &str) -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Args { dataset_path }: Args = Args::parse();
+
+    println!("reading files from {}..", dataset_path);
 
     let files = read_dir(dataset_path)?;
 
