@@ -247,7 +247,8 @@ fn train_encoder_decoder() -> Result<(), Box<dyn std::error::Error>> {
                     .index_axis_move(ndarray::Axis(0), 0)
                     .into_shape((N, M))?; //acts as an assert
 
-            let svg = SVGBackend::new("plots/disk_plot.svg", (1800, 600)).into_drawing_area();
+            let svg = SVGBackend::new("plots/disk_plot_encoder_decoder.svg", (1800, 600))
+                .into_drawing_area();
             let (reference, right) = svg.split_horizontally(600);
             let (generated, loss_plot) = right.split_horizontally(600);
 
