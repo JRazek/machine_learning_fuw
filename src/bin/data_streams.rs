@@ -4,6 +4,8 @@ use std::fs::read_dir;
 
 use clap::Parser;
 
+use std::borrow::Cow;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -11,16 +13,13 @@ struct Args {
     dataset_path: String,
 }
 
-fn filter_wksf_dataset<'a>(dataset: &str) -> String {
-    let citations_reg = regex::Regex::new(r"(\[(\d+|\/|\+|\#|\?|\&|\~|\,\,|\=|\$)])").unwrap();
+fn filter_wksf_dataset<'a>(dataset: &'a str) -> Cow<'a, str> {
+    let citations_reg =
+        regex::Regex::new(r"((\d+~[^~]+.*)|(\[(\d+|\/|\+|\#|\?|\&|\~|\,\,|\=|\$)]))").unwrap();
 
     let dataset = citations_reg.replace_all(&dataset, "");
 
-    let sources_reg = regex::Regex::new(r"\d{4}~[^~]+.*").unwrap();
-
-    let dataset = sources_reg.replace_all(&dataset, "");
-
-    dataset.into_owned()
+    dataset
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,7 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let files = read_dir(dataset_path)?;
 
     for file in files {
-        let filtered_dataset = filter_wksf_dataset(&read_to_string(file?.path())?);
+        let content = read_to_string(file?.path())?;
+        let filtered_dataset = filter_wksf_dataset(&content);
         println!("{}", filtered_dataset);
     }
 
