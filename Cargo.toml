@@ -31,7 +31,7 @@ name = "emnist_characters_train"
 name = "encoder_decoder"
 
 [[bin]]
-name = "data_streams"
+name = "word2vec"
 
 [dependencies]
 dfdx = { git = "https://github.com/coreylowman/dfdx.git", features = ["numpy", "safetensors"], rev = "4722a99" }
@@ -52,7 +52,6 @@ npyz = "0.8.3"
 clap = { version = "4.5.4", features = ["derive"] }
 regex = "1.10.4"
 tokenizers = "0.19.1"
-tensorflow = "0.21.0"
 
 [features]
 cuda = ["dfdx/cuda"]
