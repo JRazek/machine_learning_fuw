@@ -6,6 +6,8 @@ use clap::Parser;
 
 use std::borrow::Cow;
 
+use std::collections::HashMap;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -18,18 +20,24 @@ struct Args {
 
 fn filter_wksf_dataset<'a>(dataset: &'a str) -> Cow<'a, str> {
     let citations_reg =
-        regex::Regex::new(r"((\d+~[^~]+.*)|(\[(\d+|\/|\+|\#|\?|\&|\~|\,\,|\=|\$)]))").unwrap();
+        regex::Regex::new(r"((\d+~[^~]+.*)|(\[(\d+|\/|\+|\#|\?|\&|\~|\,\,|\=|\$)])|[^\w\s])")
+            .unwrap();
 
     let dataset = citations_reg.replace_all(&dataset, "");
 
     dataset
 }
 
-fn build_dictionary<'a>(datasets: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
-    let mut dictionary = datasets.collect::<Vec<&str>>();
-
-    dictionary.sort();
-    dictionary.dedup();
+fn build_dictionary<'a>(datasets: impl Iterator<Item = &'a str>) -> HashMap<u32, String> {
+    let dictionary = std::iter::once("<stop>".to_string())
+        .chain(
+            datasets
+                .flat_map(|x| x.split_whitespace())
+                .map(|x| x.to_lowercase()),
+        )
+        .enumerate()
+        .map(|(i, x)| (i as u32, x))
+        .collect();
 
     dictionary
 }
@@ -37,8 +45,8 @@ fn build_dictionary<'a>(datasets: impl Iterator<Item = &'a str>) -> Vec<&'a str>
 fn prepare_dictionary<'a>(
     dictionary_path: &str,
     datasets: impl Iterator<Item = &'a str>,
-) -> Result<Vec<(usize, String)>, std::io::Error> {
-    let dictionary: Vec<(usize, String)> = match read_to_string(dictionary_path) {
+) -> Result<HashMap<u32, String>, std::io::Error> {
+    let dictionary: HashMap<u32, String> = match read_to_string(dictionary_path) {
         Ok(dictionary) => {
             println!("cached dictionary exists.");
 
@@ -46,6 +54,7 @@ fn prepare_dictionary<'a>(
                 .lines()
                 .map(|x| x.to_string())
                 .enumerate()
+                .map(|(i, x)| (i as u32, x))
                 .collect()
         }
         Err(_) => {
@@ -53,13 +62,16 @@ fn prepare_dictionary<'a>(
 
             let dictionary = build_dictionary(datasets);
 
-            std::fs::write(dictionary_path, dictionary.join("\n"))?;
+            std::fs::write(
+                dictionary_path,
+                dictionary
+                    .values()
+                    .map(|x| x.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )?;
 
             dictionary
-                .iter()
-                .map(|x| x.to_string())
-                .enumerate()
-                .collect()
         }
     };
 
@@ -85,6 +97,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let dictionary = prepare_dictionary(&dictionary_path, datasets.iter().map(|x| x.as_str()))?;
+
+    println!("dictionary prepared, size: {}", dictionary.len());
+    println!("{:?}", dictionary);
+
+    //    let tokenizer = tokenizers::Tokenizer::new(dictionary);
 
     Ok(())
 }

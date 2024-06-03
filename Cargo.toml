@@ -51,6 +51,8 @@ num = "0.4.2"
 npyz = "0.8.3"
 clap = { version = "4.5.4", features = ["derive"] }
 regex = "1.10.4"
+tokenizers = "0.19.1"
+tensorflow = "0.21.0"
 
 [features]
 cuda = ["dfdx/cuda"]
