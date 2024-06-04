@@ -1,8 +1,7 @@
-use std::fs::read_to_string;
-
 use std::borrow::Cow;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 pub fn filter_wksf_dataset<'a>(dataset: &'a str) -> Cow<'a, str> {
     let citations_reg =
@@ -15,7 +14,12 @@ pub fn filter_wksf_dataset<'a>(dataset: &'a str) -> Cow<'a, str> {
 }
 
 pub fn preprocess_raw_text(dataset: &str) -> impl Iterator<Item = String> + '_ {
-    let ds = dataset.split_whitespace().map(|x| x.to_lowercase());
+    let stop_words = get_stop_words();
+
+    let ds = dataset
+        .split_whitespace()
+        .map(|x| x.to_lowercase())
+        .filter(move |x| !stop_words.contains(x));
 
     ds
 }
@@ -30,7 +34,10 @@ pub fn build_dictionary<'a>(
     dictionary.sort();
     dictionary.dedup();
 
-    let dictionary = std::iter::once("<stop>".to_string())
+    let dictionary = dictionary.into_iter().collect::<Vec<String>>();
+
+    let dictionary = ["<stop>".to_string()]
+        .into_iter()
         .chain(dictionary)
         .into_iter()
         .enumerate()
@@ -45,10 +52,28 @@ pub fn tokenize_preprocessed_text<'a>(
     dictionary: &HashMap<String, u32>,
 ) -> Vec<u32> {
     dataset
-        .map(|x| dictionary.get(x).unwrap_or(&0).clone())
+        .filter_map(|x| dictionary.get(x).map(|&x| x))
         .collect()
 }
 
-//pub fn inverse_dictionary(dictionary: &HashMap<u32, String>) -> HashMap<String, u32> {
-//    dictionary.iter().map(|(x, y)| (y.clone(), *x)).collect()
-//}
+pub fn detokenize_preprocessed_text<'a>(
+    dataset: impl Iterator<Item = u32>,
+    inverse_dictionary: &HashMap<u32, String>,
+) -> Vec<String> {
+    dataset
+        .filter_map(|x| inverse_dictionary.get(&x).map(|x| x.clone()))
+        .collect()
+}
+
+pub fn inverse_dictionary(dictionary: &HashMap<String, u32>) -> HashMap<u32, String> {
+    dictionary.iter().map(|(k, v)| (*v, k.clone())).collect()
+}
+
+pub fn get_stop_words() -> HashSet<String> {
+    const STOP_WORDS: &str = include_str!("stop_words.txt");
+
+    STOP_WORDS
+        .split_whitespace()
+        .map(|x| x.to_string())
+        .collect()
+}
