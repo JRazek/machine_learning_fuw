@@ -307,6 +307,9 @@ name = "cudarc"
 version = "0.9.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1871a911a2b9a3f66a285896a719159985683bf9903aa2cf89e0c9f53e14552"
+dependencies = [
+ "half",
+]
 
 [[package]]
 name = "darling"
@@ -394,6 +397,7 @@ dependencies = [
  "cudarc",
  "gemm",
  "glob",
+ "half",
  "libm",
  "memmap2",
  "num-traits",
@@ -626,6 +630,8 @@ dependencies = [
  "cfg-if",
  "crunchy",
  "num-traits",
+ "rand",
+ "rand_distr",
 ]
 
 [[package]]

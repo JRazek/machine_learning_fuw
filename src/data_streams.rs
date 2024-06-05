@@ -36,9 +36,7 @@ pub fn build_dictionary<'a>(
 
     let dictionary = dictionary.into_iter().collect::<Vec<String>>();
 
-    let dictionary = ["<stop>".to_string()]
-        .into_iter()
-        .chain(dictionary)
+    let dictionary = dictionary
         .into_iter()
         .enumerate()
         .map(|(i, x)| (x, i as u32))

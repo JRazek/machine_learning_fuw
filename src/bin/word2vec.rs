@@ -14,14 +14,13 @@ use dfdx::prelude::*;
 
 #[derive(Sequential, Default, Debug, Clone)]
 struct SkipGram<const DICTIONARY_SIZE: usize, const EMBEDDING_SIZE: usize> {
-    embedding: LinearConstConfig<DICTIONARY_SIZE, EMBEDDING_SIZE>,
-    sigmoid: Sigmoid,
+    embedding: EmbeddingNet<DICTIONARY_SIZE, EMBEDDING_SIZE>,
     output_layer: LinearConstConfig<EMBEDDING_SIZE, DICTIONARY_SIZE>,
 }
 
 #[derive(Sequential, Default, Debug, Clone)]
-struct EmbeddingNet<const VOCAB_SIZE: usize, const EMBEDDING_SIZE: usize> {
-    embedding: LinearConstConfig<VOCAB_SIZE, EMBEDDING_SIZE>,
+pub struct EmbeddingNet<const DICTIONARY_SIZE: usize, const EMBEDDING_SIZE: usize> {
+    pub linear1: LinearConstConfig<DICTIONARY_SIZE, EMBEDDING_SIZE>,
 }
 
 fn skipgram_training<
@@ -44,18 +43,10 @@ where
     D: Device<E>,
     [E; 2 * RADIUS]:,
     M: Module<
-            Tensor<Rank2<{ 2 * RADIUS }, DICTIONARY_SIZE>, E, D, OwnedTape<E, D>>,
-            Output = Tensor<Rank2<{ 2 * RADIUS }, DICTIONARY_SIZE>, E, D, OwnedTape<E, D>>,
+            Tensor<Rank1<DICTIONARY_SIZE>, E, D, OwnedTape<E, D>>,
+            Output = Tensor<Rank1<DICTIONARY_SIZE>, E, D, OwnedTape<E, D>>,
         > + UpdateParams<E, D>,
 {
-    let stop_iter = std::iter::repeat_n(0, RADIUS); //stop words padding
-
-    let dataset: Vec<u32> = stop_iter
-        .clone()
-        .chain(dataset.iter().cloned())
-        .chain(stop_iter)
-        .collect();
-
     let mut optimizer = Adam::new(&module, adam_config);
 
     println!("training..");
@@ -65,7 +56,6 @@ where
             .iter()
             .map(|&x| inverse_dictionary[&x].clone())
             .collect::<Vec<_>>();
-        println!("window: {:?}", window_words);
 
         let current_token = window[RADIUS] as usize;
         let neighbours: [usize; 2 * RADIUS] = window[0..RADIUS]
@@ -76,26 +66,18 @@ where
             .try_into()
             .unwrap();
 
-        let current_word = inverse_dictionary[&(current_token as u32)].clone();
-        let neighbours_words = neighbours
-            .iter()
-            .map(|&x| inverse_dictionary[&(x as u32)].clone())
-            .collect::<Vec<_>>();
-
-        println!("neighbours of: {:?}, {:?}", current_word, neighbours_words);
-
-        let input: Tensor<Rank2<{ 2 * RADIUS }, DICTIONARY_SIZE>, E, D, OwnedTape<_, _>> = dev
-            .one_hot_encode(Const::<DICTIONARY_SIZE>, [current_token; 2 * RADIUS])
+        let input: Tensor<Rank1<DICTIONARY_SIZE>, E, D, OwnedTape<_, _>> = dev
+            .one_hot_encode(Const::<DICTIONARY_SIZE>, neighbours)
+            .sum::<_, Axis<0>>()
             .retaped();
 
-        let target: Tensor<Rank2<{ 2 * RADIUS }, DICTIONARY_SIZE>, E, D> =
-            dev.one_hot_encode(Const::<DICTIONARY_SIZE>, neighbours);
+        let target: Tensor<Rank1<DICTIONARY_SIZE>, E, D> = dev
+            .one_hot_encode(Const::<DICTIONARY_SIZE>, [current_token])
+            .reshape();
 
         let output = module.forward(input);
 
         let loss = cross_entropy_with_logits_loss(output, target);
-
-        println!("loss: {:?}", loss.as_vec()[0]);
 
         let grads = loss.backward();
 
@@ -115,17 +97,38 @@ where
     E: Dtype,
     D: Device<E>,
 {
-    let dot_product = lhs.clone().try_mul(rhs.clone())?.sum::<Rank0, _>();
+    let lhs_normalized = lhs.normalize(1e-5);
+    let rhs_normalized = rhs.normalize(1e-5);
 
-    let lhs_norm = lhs.square().sum::<Rank0, _>().sqrt();
-    let rhs_norm = rhs.square().sum::<Rank0, _>().sqrt();
+    let dot_product = lhs_normalized
+        .clone()
+        .try_mul(rhs_normalized.clone())?
+        .sum::<Rank0, _>();
+
+    let lhs_norm = lhs_normalized.square().sum::<Rank0, _>().sqrt();
+    let rhs_norm = rhs_normalized.square().sum::<Rank0, _>().sqrt();
 
     let similarity = dot_product / (lhs_norm * rhs_norm);
 
     Ok(similarity)
 }
 
-fn find_cos_similarities_with_tokens<
+fn one_hot_encode_token<const DICTIONARY_SIZE: usize, const EMBEDDING_SIZE: usize, E, D>(
+    dev: D,
+    token: u32,
+) -> Result<Tensor<Rank1<DICTIONARY_SIZE>, E, D>, Box<dyn std::error::Error>>
+where
+    E: Dtype,
+    D: Device<E>,
+{
+    let lhs_one_hot = dev
+        .one_hot_encode(Const::<DICTIONARY_SIZE>, [token as usize])
+        .reshape();
+
+    Ok(lhs_one_hot)
+}
+
+fn find_cos_similarities_tokens_dataset<
     const DICTIONARY_SIZE: usize,
     const EMBEDDING_SIZE: usize,
     E,
@@ -206,7 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    println!("dataset: {:?}", dataset);
     println!("dictionary length: {:?}", dictionary.len());
 
-    const DICTIONARY_SIZE: usize = 11457;
+    const DICTIONARY_SIZE: usize = 10394;
     assert_eq!(dictionary.len(), DICTIONARY_SIZE);
 
     println!("tokenizing dataset..");
@@ -221,7 +224,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dev = AutoDevice::default();
 
     let adam_config = AdamConfig {
-        lr: 4e-3,
+        lr: 1e-3,
+        eps: 1e-5,
         ..Default::default()
     };
 
@@ -234,63 +238,92 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut iteration = 0;
 
-    const EMEDDINGS_SIZE: usize = 256;
-    const EPOCHS: usize = 10;
+    const EMEDDINGS_SIZE: usize = 128;
+    const EPOCHS: usize = 1000;
 
     let mut callback = move |module: &DeviceSkipGram<DICTIONARY_SIZE, EMEDDINGS_SIZE, _, _>| {
-        iteration += 1;
-        println!("iteration: {}", iteration);
-
         if iteration % 1000 == 0 {
+            println!("iteration: {}", iteration);
             println!("saving model..");
 
             module.save_safetensors(&embedding_model_path).unwrap();
         }
+
+        iteration += 1;
     };
 
-    if train {
-        for epoch in 0..EPOCHS {
-            println!("epoch: {}", epoch);
-            module = skipgram_training::<DICTIONARY_SIZE, EMEDDINGS_SIZE, 3, f32, _, _>(
-                &tokenized_datasets_flattened,
-                dev.clone(),
-                module,
-                &inverse_dictionary,
-                adam_config,
-                &mut callback,
-            )?;
+    match train {
+        true => {
+            for epoch in 0..EPOCHS {
+                println!("epoch: {}", epoch);
+                module = skipgram_training::<DICTIONARY_SIZE, EMEDDINGS_SIZE, 3, f32, _, _>(
+                    &tokenized_datasets_flattened,
+                    dev.clone(),
+                    module,
+                    &inverse_dictionary,
+                    adam_config,
+                    &mut callback,
+                )?;
+            }
+        }
+        false => {
+            let get_similarities = |word| {
+                let similarities =
+                    find_cos_similarities_tokens_dataset::<
+                        DICTIONARY_SIZE,
+                        EMEDDINGS_SIZE,
+                        f32,
+                        _,
+                        _,
+                    >(dev.clone(), dictionary[word], &module.embedding)?
+                    .to_vec()
+                    .into_iter()
+                    .take(10)
+                    .map(|(i, x)| (inverse_dictionary[&i].clone(), x))
+                    .collect::<Vec<_>>();
+
+                Ok::<_, Box<dyn std::error::Error>>(similarities)
+            };
+
+            let test_similarity_pair = |lhs: &str, rhs: &str| {
+                let lhs = one_hot_encode_token::<DICTIONARY_SIZE, EMEDDINGS_SIZE, f32, _>(
+                    dev.clone(),
+                    dictionary[lhs],
+                )?;
+
+                let rhs = one_hot_encode_token::<DICTIONARY_SIZE, EMEDDINGS_SIZE, f32, _>(
+                    dev.clone(),
+                    dictionary[rhs],
+                )?;
+
+                let similarity = cosine_similarity(
+                    module.embedding.forward(lhs),
+                    module.embedding.forward(rhs),
+                )?
+                .as_vec()[0];
+
+                Ok::<_, Box<dyn std::error::Error>>(similarity)
+            };
+
+            let similarities_man = get_similarities("man")?;
+            println!("embedding similarities: {:?}", similarities_man);
+
+            println!(
+                "similarity mother, father: {:?}",
+                test_similarity_pair("mother", "father")?
+            );
+
+            println!(
+                "similarity father, son: {:?}",
+                test_similarity_pair("father", "son")?
+            );
+
+            println!(
+                "similarity lady, sword: {:?}",
+                test_similarity_pair("lady", "sword")?
+            );
         }
     }
-
-    let get_similarities = |word| {
-        let similarities =
-            find_cos_similarities_with_tokens::<DICTIONARY_SIZE, EMEDDINGS_SIZE, f32, _, _>(
-                dev.clone(),
-                dictionary[word],
-                &module.embedding,
-            )?
-            .to_vec()
-            .into_iter()
-            .take(5)
-            .map(|(i, x)| (inverse_dictionary[&i].clone(), x))
-            .collect::<Vec<_>>();
-
-        Ok::<_, Box<dyn std::error::Error>>(similarities)
-    };
-
-    let similarities_mother = get_similarities("mother")?;
-    println!("embedding similarities: {:?}", similarities_mother);
-    let similarities_father = get_similarities("father")?;
-    println!("embedding similarities: {:?}", similarities_father);
-    let similarities_majesty = get_similarities("majesty")?;
-    println!("embedding similarities: {:?}", similarities_majesty);
-    let similarities_lady = get_similarities("lady")?;
-    println!("embedding similarities: {:?}", similarities_lady);
-    let similarities_man = get_similarities("man")?;
-    println!("embedding similarities: {:?}", similarities_man);
-
-    let similarities_daughter = get_similarities("master")?;
-    println!("embedding similarities: {:?}", similarities_daughter);
 
     Ok(())
 }
