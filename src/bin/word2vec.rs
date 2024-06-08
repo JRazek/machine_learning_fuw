@@ -183,8 +183,8 @@ fn plot_pca<
 >(
     dev: D,
     module: &M,
+    dataset_labels: &[&str; SAMPLE_SIZE],
     dictionary: &HashMap<String, u32>,
-    seeded_rng: &mut rand::rngs::StdRng,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     E: Dtype,
@@ -199,17 +199,10 @@ where
     use linfa::traits::{Fit, Predict};
     use linfa_reduction::Pca;
 
-    let dataset_sample: [usize; SAMPLE_SIZE] = dictionary
-        .values()
-        .cloned()
-        .collect::<Vec<_>>()
-        .choose_multiple(seeded_rng, SAMPLE_SIZE)
-        .map(|&x| x as usize)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
+    let mapped_dataset: [usize; SAMPLE_SIZE] = dataset_labels.map(|x| dictionary[x] as usize);
 
-    let one_hot_encoded = dev.one_hot_encode(Const::<DICTIONARY_SIZE>, dataset_sample);
+    let one_hot_encoded = dev.one_hot_encode(Const::<DICTIONARY_SIZE>, mapped_dataset);
+
     let embeddings = module.forward(one_hot_encoded);
 
     let embeddings_ndarray = ndarray::Array2::from_shape_vec(
@@ -237,6 +230,7 @@ where
 
     let reduced_embeddings = reduced_embeddings.map(|&x| x as f32);
     uczenie_maszynowe_fuw::plots::plot_cartesian2d_points(
+        dataset_labels,
         reduced_embeddings,
         "PCA Embeddings",
         &plot,
@@ -352,11 +346,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if pca {
-        plot_pca::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, 1000, f32, _, _>(
+        let dataset_sample: [&str; _] = ["man", "woman", "king", "saddle", "queen"];
+
+        plot_pca::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, _, _, _, _>(
             dev.clone(),
             &module.embedding,
+            &dataset_sample,
             &dictionary,
-            &mut seeded_rng,
         )?;
     }
 

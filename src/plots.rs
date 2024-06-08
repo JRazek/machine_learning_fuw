@@ -127,6 +127,7 @@ where
 use ndarray::Array2;
 
 pub fn plot_cartesian2d_points<DB>(
+    labels: &[&str],
     data: Array2<f32>,
     label: &str,
     drawing_area: &DrawingArea<DB, Shift>,
@@ -136,6 +137,8 @@ where
 
     <DB as DrawingBackend>::ErrorType: 'static,
 {
+    assert_eq!(labels.len(), data.nrows());
+
     drawing_area.fill(&WHITE)?;
 
     let mut drawing_area = ChartBuilder::on(&drawing_area);
@@ -170,11 +173,10 @@ where
 
     use plotters::style::full_palette;
 
-    const COLORS: [RGBColor; 6] = [
+    const COLORS: [RGBColor; 5] = [
         full_palette::RED,
         full_palette::GREEN,
         full_palette::BLUE,
-        full_palette::YELLOW,
         full_palette::CYAN,
         full_palette::BLACK,
     ];
@@ -183,8 +185,15 @@ where
 
     let points = data
         .axis_iter(ndarray::Axis(0))
+        .zip(labels.iter())
         .enumerate()
-        .map(|(i, row)| Circle::new((row[0], row[1]), 3f32, get_style_i(i)));
+        .map(|(i, (row, &label))| {
+            let element = EmptyElement::at((row[0], row[1]))
+                + Circle::new((0, 0), 3f32, get_style_i(i))
+                + Text::new(label.to_owned(), (5, -5), ("Arial", 15));
+
+            element
+        });
 
     chart_context.draw_series(points)?;
 
