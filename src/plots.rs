@@ -123,3 +123,70 @@ where
 
     Ok(())
 }
+
+use ndarray::Array2;
+
+pub fn plot_cartesian2d_points<DB>(
+    data: Array2<f32>,
+    label: &str,
+    drawing_area: &DrawingArea<DB, Shift>,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    DB: DrawingBackend,
+
+    <DB as DrawingBackend>::ErrorType: 'static,
+{
+    drawing_area.fill(&WHITE)?;
+
+    let mut drawing_area = ChartBuilder::on(&drawing_area);
+
+    let max_x = data
+        .column(0)
+        .iter()
+        .cloned()
+        .map(f32::abs)
+        .reduce(f32::max)
+        .unwrap_or(1.0);
+
+    let max_y = data
+        .column(1)
+        .iter()
+        .cloned()
+        .map(f32::abs)
+        .reduce(f32::max)
+        .unwrap_or(1.0);
+
+    let mut chart_context = drawing_area
+        .caption(label, ("Arial", 20))
+        .set_all_label_area_size(70)
+        .margin(50)
+        .build_cartesian_2d(-max_x..max_x, -max_y..max_y)?;
+
+    chart_context
+        .configure_mesh()
+        .x_labels(10)
+        .y_labels(10)
+        .draw()?;
+
+    use plotters::style::full_palette;
+
+    const COLORS: [RGBColor; 6] = [
+        full_palette::RED,
+        full_palette::GREEN,
+        full_palette::BLUE,
+        full_palette::YELLOW,
+        full_palette::CYAN,
+        full_palette::BLACK,
+    ];
+
+    let get_style_i = |i: usize| COLORS[i % COLORS.len()].filled();
+
+    let points = data
+        .axis_iter(ndarray::Axis(0))
+        .enumerate()
+        .map(|(i, row)| Circle::new((row[0], row[1]), 3f32, get_style_i(i)));
+
+    chart_context.draw_series(points)?;
+
+    Ok(())
+}

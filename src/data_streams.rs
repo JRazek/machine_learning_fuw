@@ -24,23 +24,13 @@ pub fn preprocess_raw_text(dataset: &str) -> impl Iterator<Item = String> + '_ {
     ds
 }
 
-pub fn build_dictionary<'a>(
-    preprocessed_datasets: impl Iterator<Item = &'a str>,
-) -> HashMap<String, u32> {
+pub fn build_dictionary<'a>(preprocessed_datasets: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut dictionary = preprocessed_datasets
         .map(|x| x.to_string())
         .collect::<Vec<String>>();
 
     dictionary.sort();
     dictionary.dedup();
-
-    let dictionary = dictionary.into_iter().collect::<Vec<String>>();
-
-    let dictionary = dictionary
-        .into_iter()
-        .enumerate()
-        .map(|(i, x)| (x, i as u32))
-        .collect();
 
     dictionary
 }

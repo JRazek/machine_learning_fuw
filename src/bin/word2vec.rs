@@ -1,9 +1,13 @@
 #![feature(iter_repeat_n)]
 #![feature(generic_const_exprs)]
+#![feature(generic_arg_infer)]
 
 use clap::Parser;
 use std::fs::read_dir;
 use std::fs::read_to_string;
+
+use rand::prelude::SliceRandom;
+use rand::SeedableRng;
 
 use std::collections::HashMap;
 
@@ -137,6 +141,7 @@ fn find_cos_similarities_tokens_dataset<
 >(
     dev: D,
     target: u32,
+    dictionary_tokens: &[u32],
     embedding_net: &M,
 ) -> Result<Vec<(u32, E)>, Box<dyn std::error::Error>>
 where
@@ -151,7 +156,7 @@ where
 
     let mut similarities = Vec::new();
 
-    for i in 0..DICTIONARY_SIZE as u32 {
+    for &i in dictionary_tokens {
         let input: Tensor<Rank1<DICTIONARY_SIZE>, E, D> = dev
             .one_hot_encode(Const::<DICTIONARY_SIZE>, [i as usize])
             .reshape();
@@ -168,6 +173,82 @@ where
     Ok(similarities)
 }
 
+fn plot_pca<
+    const DICTIONARY_SIZE: usize,
+    const EMBEDDINGS_SIZE: usize,
+    const SAMPLE_SIZE: usize,
+    E,
+    D,
+    M,
+>(
+    dev: D,
+    module: &M,
+    dictionary: &HashMap<String, u32>,
+    seeded_rng: &mut rand::rngs::StdRng,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    E: Dtype,
+    E: num::traits::AsPrimitive<f64>,
+    D: Device<E>,
+    M: Module<
+        Tensor<Rank2<SAMPLE_SIZE, DICTIONARY_SIZE>, E, D>,
+        Output = Tensor<Rank2<SAMPLE_SIZE, EMBEDDINGS_SIZE>, E, D>,
+    >,
+{
+    use linfa::dataset::DatasetBase;
+    use linfa::traits::{Fit, Predict};
+    use linfa_reduction::Pca;
+
+    let dataset_sample: [usize; SAMPLE_SIZE] = dictionary
+        .values()
+        .cloned()
+        .collect::<Vec<_>>()
+        .choose_multiple(seeded_rng, SAMPLE_SIZE)
+        .map(|&x| x as usize)
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    let one_hot_encoded = dev.one_hot_encode(Const::<DICTIONARY_SIZE>, dataset_sample);
+    let embeddings = module.forward(one_hot_encoded);
+
+    let embeddings_ndarray = ndarray::Array2::from_shape_vec(
+        (SAMPLE_SIZE, EMBEDDINGS_SIZE),
+        embeddings
+            .as_vec()
+            .into_iter()
+            .map(|x| x.as_())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+
+    let dataset: DatasetBase<_, _> = embeddings_ndarray.into();
+
+    let embedding_pca = Pca::params(2).fit(&dataset).unwrap();
+
+    let reduced_embeddings: ndarray::Array2<_> = embedding_pca.predict(dataset).targets;
+
+    use plotters::prelude::*;
+
+    let plot =
+        SVGBackend::new("plots/word2vec_pca_embeddings.svg", (1024, 1024)).into_drawing_area();
+
+    plot.fill(&WHITE).unwrap();
+
+    let reduced_embeddings = reduced_embeddings.map(|&x| x as f32);
+    uczenie_maszynowe_fuw::plots::plot_cartesian2d_points(
+        reduced_embeddings,
+        "PCA Embeddings",
+        &plot,
+    )?;
+
+    plot.present()?;
+
+    println!("pca embeddings plotted successfully");
+
+    Ok(())
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -179,6 +260,9 @@ struct Args {
 
     #[clap(short, long, default_value = "false")]
     train: bool,
+
+    #[clap(short, long, default_value = "false")]
+    pca: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -186,6 +270,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dataset_path,
         embedding_model_path,
         train,
+        pca,
     }: Args = Args::parse();
 
     println!("reading files from {}..", dataset_path);
@@ -193,6 +278,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let files = read_dir(dataset_path)?;
 
     let mut dataset: Vec<String> = Vec::new();
+
+    let mut seeded_rng = rand::rngs::StdRng::seed_from_u64(0);
 
     for file in files {
         let content = read_to_string(file?.path())?;
@@ -202,14 +289,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dataset.append(&mut filtered_dataset);
     }
 
-    let dictionary = build_dictionary(dataset.iter().map(|x| x.as_str()))
+    let mut dictionary = build_dictionary(dataset.iter().map(|x| x.as_str()))
         .into_iter()
+        .take(2000)
+        .chain(
+            ["man", "woman", "king", "queen", "art", "saddle"]
+                .iter()
+                .map(|x| x.to_string()),
+        )
+        .collect::<Vec<_>>();
+    dictionary.shuffle(&mut seeded_rng);
+    let dictionary = dictionary
+        .into_iter()
+        .enumerate()
+        .map(|(i, x)| (x, i as u32))
         .collect::<HashMap<_, _>>();
 
     //    println!("dataset: {:?}", dataset);
     println!("dictionary length: {:?}", dictionary.len());
 
-    const DICTIONARY_SIZE: usize = 10394;
+    const DICTIONARY_SIZE: usize = 2005;
     assert_eq!(dictionary.len(), DICTIONARY_SIZE);
 
     println!("tokenizing dataset..");
@@ -238,10 +337,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut iteration = 0;
 
-    const EMEDDINGS_SIZE: usize = 128;
+    const EMBEDDINGS_SIZE: usize = 128;
     const EPOCHS: usize = 1000;
 
-    let mut callback = move |module: &DeviceSkipGram<DICTIONARY_SIZE, EMEDDINGS_SIZE, _, _>| {
+    let mut callback = move |module: &DeviceSkipGram<DICTIONARY_SIZE, EMBEDDINGS_SIZE, _, _>| {
         if iteration % 1000 == 0 {
             println!("iteration: {}", iteration);
             println!("saving model..");
@@ -252,11 +351,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         iteration += 1;
     };
 
+    if pca {
+        plot_pca::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, 1000, f32, _, _>(
+            dev.clone(),
+            &module.embedding,
+            &dictionary,
+            &mut seeded_rng,
+        )?;
+    }
+
     match train {
         true => {
             for epoch in 0..EPOCHS {
                 println!("epoch: {}", epoch);
-                module = skipgram_training::<DICTIONARY_SIZE, EMEDDINGS_SIZE, 3, f32, _, _>(
+                module = skipgram_training::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, 3, f32, _, _>(
                     &tokenized_datasets_flattened,
                     dev.clone(),
                     module,
@@ -267,31 +375,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         false => {
-            let get_similarities = |word| {
-                let similarities =
-                    find_cos_similarities_tokens_dataset::<
-                        DICTIONARY_SIZE,
-                        EMEDDINGS_SIZE,
-                        f32,
-                        _,
-                        _,
-                    >(dev.clone(), dictionary[word], &module.embedding)?
-                    .to_vec()
-                    .into_iter()
-                    .take(10)
-                    .map(|(i, x)| (inverse_dictionary[&i].clone(), x))
-                    .collect::<Vec<_>>();
+            let get_similarities = |word: &str| {
+                let similarities = find_cos_similarities_tokens_dataset::<
+                    DICTIONARY_SIZE,
+                    EMBEDDINGS_SIZE,
+                    f32,
+                    _,
+                    _,
+                >(
+                    dev.clone(),
+                    dictionary[word],
+                    dictionary.values().cloned().collect::<Vec<_>>().as_slice(),
+                    &module.embedding,
+                )?
+                .to_vec()
+                .into_iter()
+                .take(100)
+                .map(|(i, x)| (inverse_dictionary[&i].clone(), x))
+                .collect::<Vec<_>>();
 
                 Ok::<_, Box<dyn std::error::Error>>(similarities)
             };
 
             let test_similarity_pair = |lhs: &str, rhs: &str| {
-                let lhs = one_hot_encode_token::<DICTIONARY_SIZE, EMEDDINGS_SIZE, f32, _>(
+                let lhs = one_hot_encode_token::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, f32, _>(
                     dev.clone(),
                     dictionary[lhs],
                 )?;
 
-                let rhs = one_hot_encode_token::<DICTIONARY_SIZE, EMEDDINGS_SIZE, f32, _>(
+                let rhs = one_hot_encode_token::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, f32, _>(
                     dev.clone(),
                     dictionary[rhs],
                 )?;
@@ -304,24 +416,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 Ok::<_, Box<dyn std::error::Error>>(similarity)
             };
-
-            let similarities_man = get_similarities("man")?;
-            println!("embedding similarities: {:?}", similarities_man);
-
-            println!(
-                "similarity mother, father: {:?}",
-                test_similarity_pair("mother", "father")?
-            );
-
-            println!(
-                "similarity father, son: {:?}",
-                test_similarity_pair("father", "son")?
-            );
-
-            println!(
-                "similarity lady, sword: {:?}",
-                test_similarity_pair("lady", "sword")?
-            );
         }
     }
 
