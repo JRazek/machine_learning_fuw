@@ -190,7 +190,11 @@ where
         .map(|(i, (row, &label))| {
             let element = EmptyElement::at((row[0], row[1]))
                 + Circle::new((0, 0), 3f32, get_style_i(i))
-                + Text::new(label.to_owned(), (5, -5), ("Arial", 15));
+                + if labels.len() > 100 {
+                    Text::new("".to_owned(), (5, -5), ("Arial", 5))
+                } else {
+                    Text::new(label.to_owned(), (5, -5), ("Arial", 15))
+                };
 
             element
         });

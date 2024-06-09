@@ -24,13 +24,22 @@ pub fn preprocess_raw_text(dataset: &str) -> impl Iterator<Item = String> + '_ {
     ds
 }
 
-pub fn build_dictionary<'a>(preprocessed_datasets: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let mut dictionary = preprocessed_datasets
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>();
+pub fn build_dictionary<'a>(
+    preprocessed_datasets: impl Iterator<Item = &'a str>,
+    min_count: usize,
+) -> Vec<String> {
+    let hashmap: HashMap<String, usize> = preprocessed_datasets
+        .flat_map(|x| x.split_whitespace())
+        .fold(HashMap::new(), |mut acc, x| {
+            *acc.entry(x.to_string()).or_insert(0) += 1;
+            acc
+        });
 
-    dictionary.sort();
-    dictionary.dedup();
+    let dictionary = hashmap
+        .into_iter()
+        .filter(|(_, v)| *v >= min_count)
+        .map(|(k, _)| k)
+        .collect();
 
     dictionary
 }
@@ -40,7 +49,7 @@ pub fn tokenize_preprocessed_text<'a>(
     dictionary: &HashMap<String, u32>,
 ) -> Vec<u32> {
     dataset
-        .filter_map(|x| dictionary.get(x).map(|&x| x))
+        .map(|x| dictionary.get(x).unwrap_or(&0).clone())
         .collect()
 }
 

@@ -6,9 +6,6 @@ use clap::Parser;
 use std::fs::read_dir;
 use std::fs::read_to_string;
 
-use rand::prelude::SliceRandom;
-use rand::SeedableRng;
-
 use std::collections::HashMap;
 
 use uczenie_maszynowe_fuw::data_streams::*;
@@ -17,8 +14,9 @@ use dfdx::data::OneHotEncode;
 use dfdx::prelude::*;
 
 #[derive(Sequential, Default, Debug, Clone)]
-struct SkipGram<const DICTIONARY_SIZE: usize, const EMBEDDING_SIZE: usize> {
+struct Cbow<const DICTIONARY_SIZE: usize, const EMBEDDING_SIZE: usize> {
     embedding: EmbeddingNet<DICTIONARY_SIZE, EMBEDDING_SIZE>,
+    sigmoid: Sigmoid,
     output_layer: LinearConstConfig<EMBEDDING_SIZE, DICTIONARY_SIZE>,
 }
 
@@ -27,7 +25,7 @@ pub struct EmbeddingNet<const DICTIONARY_SIZE: usize, const EMBEDDING_SIZE: usiz
     pub linear1: LinearConstConfig<DICTIONARY_SIZE, EMBEDDING_SIZE>,
 }
 
-fn skipgram_training<
+fn cbow_training<
     const DICTIONARY_SIZE: usize,
     const EMBEDDING_SIZE: usize,
     const RADIUS: usize,
@@ -40,10 +38,10 @@ fn skipgram_training<
     mut module: M,
     inverse_dictionary: &HashMap<u32, String>,
     adam_config: AdamConfig,
-    mut model_callback: impl FnMut(&M),
+    mut model_callback: impl FnMut(&M, E, &[&str]),
 ) -> Result<M, Box<dyn std::error::Error>>
 where
-    E: Dtype + rand::distributions::uniform::SampleUniform + num::Float + num::FromPrimitive,
+    E: Dtype,
     D: Device<E>,
     [E; 2 * RADIUS]:,
     M: Module<
@@ -62,17 +60,22 @@ where
             .collect::<Vec<_>>();
 
         let current_token = window[RADIUS] as usize;
-        let neighbours: [usize; 2 * RADIUS] = window[0..RADIUS]
+        let neighbours: Vec<_> = window[0..RADIUS]
             .iter()
             .chain(window[RADIUS + 1..].iter())
-            .map(|&x| x as usize)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+            .filter_map(|&x| match x {
+                0 => None,
+                _ => Some(x as usize),
+            })
+            .collect::<Vec<_>>();
+
+        if neighbours.is_empty() {
+            continue;
+        }
 
         let input: Tensor<Rank1<DICTIONARY_SIZE>, E, D, OwnedTape<_, _>> = dev
             .one_hot_encode(Const::<DICTIONARY_SIZE>, neighbours)
-            .sum::<_, Axis<0>>()
+            .mean::<_, Axis<0>>()
             .retaped();
 
         let target: Tensor<Rank1<DICTIONARY_SIZE>, E, D> = dev
@@ -83,11 +86,20 @@ where
 
         let loss = cross_entropy_with_logits_loss(output, target);
 
+        let loss_scalar = loss.as_vec()[0];
         let grads = loss.backward();
 
         optimizer.update(&mut module, &grads)?;
 
-        model_callback(&module);
+        model_callback(
+            &module,
+            loss_scalar,
+            window_words
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
     }
 
     Ok(module)
@@ -199,6 +211,7 @@ where
     use linfa::traits::{Fit, Predict};
     use linfa_reduction::Pca;
 
+    println!("dictionary: {:?}", dictionary);
     let mapped_dataset: [usize; SAMPLE_SIZE] = dataset_labels.map(|x| dictionary[x] as usize);
 
     let one_hot_encoded = dev.one_hot_encode(Const::<DICTIONARY_SIZE>, mapped_dataset);
@@ -273,8 +286,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut dataset: Vec<String> = Vec::new();
 
-    let mut seeded_rng = rand::rngs::StdRng::seed_from_u64(0);
-
     for file in files {
         let content = read_to_string(file?.path())?;
         let mut filtered_dataset =
@@ -283,16 +294,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dataset.append(&mut filtered_dataset);
     }
 
-    let mut dictionary = build_dictionary(dataset.iter().map(|x| x.as_str()))
-        .into_iter()
-        .take(2000)
-        .chain(
-            ["man", "woman", "king", "queen", "art", "saddle"]
-                .iter()
-                .map(|x| x.to_string()),
-        )
-        .collect::<Vec<_>>();
-    dictionary.shuffle(&mut seeded_rng);
+    let dictionary = build_dictionary(dataset.iter().map(|x| x.as_str()), 5);
+
     let dictionary = dictionary
         .into_iter()
         .enumerate()
@@ -302,7 +305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    println!("dataset: {:?}", dataset);
     println!("dictionary length: {:?}", dictionary.len());
 
-    const DICTIONARY_SIZE: usize = 2005;
+    const DICTIONARY_SIZE: usize = 2442;
     assert_eq!(dictionary.len(), DICTIONARY_SIZE);
 
     println!("tokenizing dataset..");
@@ -316,13 +319,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let dev = AutoDevice::default();
 
-    let adam_config = AdamConfig {
+    let mut adam_config = AdamConfig {
         lr: 1e-3,
         eps: 1e-5,
         ..Default::default()
     };
 
-    let mut module = dev.build_module::<f32>(SkipGram::default());
+    let mut module = dev.build_module::<f32>(Cbow::default());
 
     match module.load_safetensors(&embedding_model_path) {
         Ok(_) => println!("model loaded successfully"),
@@ -334,10 +337,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const EMBEDDINGS_SIZE: usize = 128;
     const EPOCHS: usize = 1000;
 
-    let mut callback = move |module: &DeviceSkipGram<DICTIONARY_SIZE, EMBEDDINGS_SIZE, _, _>| {
+    let mut callback = move |module: &DeviceCbow<DICTIONARY_SIZE, EMBEDDINGS_SIZE, _, _>,
+                             loss: f32,
+                             window: &[&str]| {
         if iteration % 1000 == 0 {
-            println!("iteration: {}", iteration);
-            println!("saving model..");
+            println!("iteration: {}, loss: {}", iteration, loss);
+            println!("window: {:?}", window);
 
             module.save_safetensors(&embedding_model_path).unwrap();
         }
@@ -346,7 +351,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if pca {
-        let dataset_sample: [&str; _] = ["man", "woman", "king", "saddle", "queen"];
+        let dataset_sample: [&str; _] = [
+            "man", "woman", "mother", "king", "saddle", "horse", "curse", "lady", "father", "dog",
+            "kingdom", "crown", "marry", "god", "loving", "kill",
+        ];
+
+        let dataset_sample: [&str; _] = dataset_sample;
 
         plot_pca::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, _, _, _, _>(
             dev.clone(),
@@ -360,7 +370,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         true => {
             for epoch in 0..EPOCHS {
                 println!("epoch: {}", epoch);
-                module = skipgram_training::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, 3, f32, _, _>(
+                module = cbow_training::<DICTIONARY_SIZE, EMBEDDINGS_SIZE, 1, f32, _, _>(
                     &tokenized_datasets_flattened,
                     dev.clone(),
                     module,
@@ -368,6 +378,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     adam_config,
                     &mut callback,
                 )?;
+
+                adam_config.lr *= 0.99;
+                println!("epoch: {}, lr: {}", epoch, adam_config.lr);
             }
         }
         false => {
@@ -412,6 +425,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 Ok::<_, Box<dyn std::error::Error>>(similarity)
             };
+
+            let similarities_king = get_similarities("king")?;
+
+            println!("similarities to king: {:?}", similarities_king);
+
+            let similarity_king_crown = test_similarity_pair("king", "dog")?;
+
+            println!(
+                "similarity between king and crown: {}",
+                similarity_king_crown
+            );
         }
     }
 
