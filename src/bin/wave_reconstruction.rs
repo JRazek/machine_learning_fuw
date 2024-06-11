@@ -1,4 +1,4 @@
-use candle_core::{DType, Device, Tensor};
+use candle_core::{DType, Device, Shape, Tensor};
 
 use rand::rngs::StdRng;
 use rand_distr::{DistIter, Distribution, Uniform};
@@ -11,8 +11,15 @@ use candle_nn::{Module, VarBuilder, VarMap};
 
 use candle_nn::rnn::RNN;
 
+use std::ops::Range;
+
 fn wave_fn(omega: f32, x: f32) -> f32 {
     (omega * x).sin()
+}
+
+struct WaveBatch {
+    x_tensor: ndarray::Array2<f32>,
+    y_tensor: ndarray::Array2<f32>,
 }
 
 fn get_wave_data(
@@ -21,23 +28,57 @@ fn get_wave_data(
     batch_size: usize,
     step: f32,
     rng: &mut StdRng,
-    device: &Device,
-) -> Result<Tensor, candle_core::Error> {
+) -> Result<WaveBatch, ndarray::ShapeError> {
     let uniform = Uniform::new(0f32, 2f32 * std::f32::consts::PI);
 
-    let points_iter_batches = uniform
+    let points_x_vec: Vec<f32> = uniform
         .sample_iter(rng)
-        .flat_map(|x_0| (0..samples).map(|i| wave_fn(omega, i as f32 * step)));
+        .flat_map(|x_0| {
+            (0..samples).map(move |i| {
+                let x = x_0 + i as f32 * step;
+                x
+            })
+        })
+        .collect();
 
-    Tensor::from_iter(points_iter_batches, device)
+    let shape = (batch_size, samples);
+
+    let x_tensor = ndarray::Array2::from_shape_vec(shape.clone(), points_x_vec.clone())?;
+
+    let y_tensor = ndarray::Array2::from_shape_vec(
+        shape,
+        points_x_vec
+            .into_iter()
+            .map(|x| wave_fn(omega, x))
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok(WaveBatch { x_tensor, y_tensor })
 }
 
 fn train(
-    lstm: LSTM,
+    mut lstm: LSTM,
+    omega: f32,
+    samples_range: Range<usize>,
     batch_size: usize,
+    step: f32,
+    n_iter: u32,
     rng: &mut StdRng,
+    device: &Device,
 ) -> Result<LSTM, Box<dyn std::error::Error>> {
-    todo!()
+    let samples_uniform = Uniform::from(samples_range);
+
+    for _ in 0..n_iter {
+        let samples = samples_uniform.sample(rng);
+        let WaveBatch { x_tensor, y_tensor } =
+            get_wave_data(omega, samples, batch_size, step, rng)?;
+
+        for sample in 0..samples {
+            //        x_tensor.get_on_dim(
+        }
+    }
+
+    Ok(lstm)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
