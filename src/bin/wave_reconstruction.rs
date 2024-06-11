@@ -7,6 +7,9 @@ use candle_nn::loss::{cross_entropy, mse};
 use candle_nn::rnn::{lstm, LSTMConfig, LSTMState, LSTM};
 use candle_nn::{linear, Linear};
 
+use candle_nn::Optimizer;
+use candle_nn::{AdamW, ParamsAdamW};
+
 use candle_nn::{Module, VarBuilder, VarMap};
 
 use candle_nn::rnn::RNN;
@@ -61,7 +64,16 @@ fn get_wave_data(
 
 struct WaveNet {
     pub lstm: LSTM,
-    //    fc: linear::Linear,
+    pub fc: linear::Linear,
+}
+
+impl WaveNet {
+    fn new(vb: candle_nn::VarBuilder) -> Result<WaveNet, candle_core::Error> {
+        let lstm = lstm(1, 32, LSTMConfig::default(), vb.clone())?;
+        let fc = linear(32, 1, vb.clone())?;
+
+        Ok(WaveNet { lstm, fc })
+    }
 }
 
 impl Module for WaveNet {
@@ -72,9 +84,11 @@ impl Module for WaveNet {
             .last()
             .ok_or(std::io::Error::new(std::io::ErrorKind::Other, "no states"))?;
 
-        //        let y = self.fc.forward(&last_state.h())?;
+        let y = last_state.h().clone();
+        let y = self.fc.forward(&y)?;
+        let y = candle_nn::ops::sigmoid(&y)?;
 
-        Ok(last_state.h().clone())
+        Ok(y)
     }
 }
 
@@ -85,6 +99,7 @@ fn train(
     batch_size: usize,
     step: f32,
     n_iter: u32,
+    mut optimizer: impl Optimizer,
     rng: &mut StdRng,
     device: &Device,
 ) -> Result<WaveNet, Box<dyn std::error::Error>> {
@@ -124,6 +139,8 @@ fn train(
 
         let loss = mse(&pred, &y_last_dev_tensor)?;
 
+        optimizer.backward_step(&loss)?;
+
         println!("loss: {:?}", loss);
     }
 
@@ -131,23 +148,35 @@ fn train(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let device = Device::Cpu;
+    let device = Device::cuda_if_available(0)?;
     println!("device: {:?}", device);
 
     let varmap = VarMap::new();
     let varbuilder = VarBuilder::from_varmap(&varmap, DType::F32, &device);
 
-    let a = Tensor::randn(0f32, 1., (2, 3), &device)?;
-    let b = Tensor::randn(0f32, 1., (3, 4), &device)?;
-
-    let c = a.matmul(&b)?;
-
-    let lstm = lstm(1, 1, LSTMConfig::default(), varbuilder.clone())?;
-    let wave_net = WaveNet { lstm };
+    let wave_net = WaveNet::new(varbuilder.clone())?;
 
     let mut rng = StdRng::seed_from_u64(0);
 
-    let wave_net = train(wave_net, 1., 10..100, 20, 0.1, 1000, &mut rng, &device)?;
+    let mut opt = AdamW::new(
+        varmap.all_vars(),
+        ParamsAdamW {
+            lr: 0.001,
+            ..Default::default()
+        },
+    )?;
+
+    let wave_net = train(
+        wave_net,
+        1.,
+        10..100,
+        1000,
+        0.01,
+        10000,
+        opt,
+        &mut rng,
+        &device,
+    )?;
 
     Ok(())
 }
