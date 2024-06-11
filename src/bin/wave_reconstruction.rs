@@ -131,7 +131,7 @@ fn train(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let device = Device::cuda_if_available(0)?;
+    let device = Device::Cpu;
     println!("device: {:?}", device);
 
     let varmap = VarMap::new();
@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rng = StdRng::seed_from_u64(0);
 
-    let wave_net = train(wave_net, 1., 1..10, 17, 0.1, 10000, &mut rng, &device)?;
+    let wave_net = train(wave_net, 1., 10..100, 20, 0.1, 1000, &mut rng, &device)?;
 
     Ok(())
 }

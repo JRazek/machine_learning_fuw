@@ -59,4 +59,4 @@ candle-core = "0.5.1"
 candle-nn = "0.5.1"
 
 [features]
-cuda = ["dfdx/cuda"]
+cuda = ["dfdx/cuda", "candle-nn/cuda"]
