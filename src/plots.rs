@@ -124,6 +124,45 @@ where
     Ok(())
 }
 
+use plotters::coord::types::RangedCoordf32;
+
+pub fn plot_chart<DB>(
+    data: impl Iterator<Item = (f32, f32)> + Clone,
+    caption: impl AsRef<str>,
+    x_range: std::ops::Range<f32>,
+    y_range: std::ops::Range<f32>,
+    drawing_area: &DrawingArea<DB, Shift>,
+) -> Result<ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordf32>>, Box<dyn std::error::Error>>
+where
+    DB: DrawingBackend,
+    <DB as DrawingBackend>::ErrorType: 'static,
+{
+    drawing_area.fill(&WHITE)?;
+
+    let mut drawing_area = ChartBuilder::on(&drawing_area);
+
+    let mut chart_context = drawing_area
+        .caption(caption, ("Arial", 20))
+        .set_all_label_area_size(70)
+        .margin(50)
+        .build_cartesian_2d(x_range, y_range.clone())?;
+
+    chart_context
+        .configure_mesh()
+        .x_labels(10)
+        .x_desc("x")
+        .y_labels(10)
+        .y_desc("y")
+        .y_label_formatter(&|y| format!("{:.1e}", y))
+        .draw()?;
+
+    let points = LineSeries::new(data, BLUE.filled());
+
+    chart_context.draw_series(points)?;
+
+    Ok(chart_context)
+}
+
 use ndarray::Array2;
 
 pub fn plot_cartesian2d_points<DB>(
@@ -202,4 +241,28 @@ where
     chart_context.draw_series(points)?;
 
     Ok(())
+}
+
+pub struct MinMax<T> {
+    pub min: T,
+    pub max: T,
+}
+
+pub fn find_max_min<T: std::cmp::PartialOrd + Copy>(
+    mut data: impl Iterator<Item = T>,
+) -> Option<MinMax<T>> {
+    let mut init = data.next()?;
+    let mut min_max = MinMax {
+        min: init,
+        max: init,
+    };
+
+    for x in data {
+        min_max = MinMax {
+            min: if x < min_max.min { x } else { min_max.min },
+            max: if x > min_max.max { x } else { min_max.max },
+        };
+    }
+
+    Some(min_max)
 }
