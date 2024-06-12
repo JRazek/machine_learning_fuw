@@ -62,35 +62,82 @@ fn get_wave_data(
     Ok(WaveBatch { x_tensor, y_tensor })
 }
 
-struct WaveNet {
-    pub lstm: LSTM,
-    pub fc: linear::Linear,
-}
+mod wave_net {
+    use super::*;
 
-impl WaveNet {
-    fn new(vb: candle_nn::VarBuilder) -> Result<WaveNet, candle_core::Error> {
-        let lstm = lstm(1, 32, LSTMConfig::default(), vb.clone())?;
-        let fc = linear(32, 1, vb.clone())?;
+    pub(super) struct WaveNet {
+        pub lstm: LSTM,
+        pub fc1: linear::Linear,
+        pub fc2: linear::Linear,
 
-        Ok(WaveNet { lstm, fc })
+        device: Device,
+        dtype: DType,
     }
-}
 
-impl Module for WaveNet {
-    fn forward(&self, xs: &Tensor) -> candle_core::Result<Tensor> {
-        let states = self.lstm.seq(&xs)?;
+    impl WaveNet {
+        pub(super) fn new(
+            vb: candle_nn::VarBuilder,
+            device: Device,
+            dtype: DType,
+        ) -> Result<WaveNet, candle_core::Error> {
+            let lstm = lstm(1, 32, LSTMConfig::default(), vb.pp("lstm1"))?;
+            let fc1 = linear(32, 32, vb.pp("fc1"))?;
+            let fc2 = linear(32, 1, vb.pp("fc2"))?;
 
-        let last_state = states
-            .last()
-            .ok_or(std::io::Error::new(std::io::ErrorKind::Other, "no states"))?;
-
-        let y = last_state.h().clone();
-        let y = self.fc.forward(&y)?;
-        let y = candle_nn::ops::sigmoid(&y)?;
-
-        Ok(y)
+            Ok(WaveNet {
+                lstm,
+                fc1,
+                fc2,
+                device,
+                dtype,
+            })
+        }
     }
+
+    impl RNN for WaveNet {
+        type State = Tensor;
+
+        fn zero_state(&self, batch_dim: usize) -> candle_core::Result<Self::State> {
+            let tensor = Tensor::zeros(&[batch_dim, 32], self.dtype, &self.device)?;
+
+            Ok(tensor)
+        }
+
+        fn step(&self, input: &Tensor, state: &Self::State) -> candle_core::Result<Self::State> {
+            let y = candle_nn::ops::leaky_relu(state, 0.01)?;
+            let y = self.fc1.forward(&y)?;
+            let y = candle_nn::ops::leaky_relu(&y, 0.01)?;
+            let y = self.fc2.forward(&y)?;
+
+            Ok(y)
+        }
+
+        fn states_to_tensor(&self, states: &[Self::State]) -> candle_core::Result<Tensor> {
+            todo!()
+            //        self.lstm.states_to_tensor(states)
+        }
+    }
+    //
+    //impl Module for WaveNet {
+    //    fn forward(&self, xs: &Tensor) -> candle_core::Result<Tensor> {
+    //        let states = self.lstm.seq(&xs)?;
+    //
+    //        let last_state = states
+    //            .last()
+    //            .ok_or(std::io::Error::new(std::io::ErrorKind::Other, "no states"))?;
+    //
+    //        let y = last_state.h().clone();
+    //        let y = candle_nn::ops::leaky_relu(&y, 0.01)?;
+    //        let y = self.fc1.forward(&y)?;
+    //        let y = candle_nn::ops::leaky_relu(&y, 0.01)?;
+    //        let y = self.fc2.forward(&y)?;
+    //
+    //        Ok(y)
+    //    }
+    //}
 }
+
+use wave_net::*;
 
 fn train(
     mut wave_net: WaveNet,
@@ -133,7 +180,7 @@ fn train(
             &Shape::from_dims(&[batch_size, 1])
         );
 
-        let pred = wave_net.forward(&x_dev_tensor)?;
+        let pred = wave_net.states_to_tensor(&wave_net.seq(&x_dev_tensor)?)?;
 
         assert_eq!(pred.shape(), &Shape::from_dims(&[batch_size, 1]));
 
@@ -147,6 +194,17 @@ fn train(
     Ok(wave_net)
 }
 
+fn plot_predictions(
+    mut wave_net: &WaveNet,
+    omega: f32,
+    rng: &mut StdRng,
+    device: &Device,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let wave = get_wave_data(omega, 100, 1, 0.01, rng)?;
+
+    todo!()
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device = Device::cuda_if_available(0)?;
     println!("device: {:?}", device);
@@ -154,14 +212,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let varmap = VarMap::new();
     let varbuilder = VarBuilder::from_varmap(&varmap, DType::F32, &device);
 
-    let wave_net = WaveNet::new(varbuilder.clone())?;
+    let wave_net = WaveNet::new(varbuilder, device.clone(), DType::F32)?;
 
     let mut rng = StdRng::seed_from_u64(0);
 
     let mut opt = AdamW::new(
         varmap.all_vars(),
         ParamsAdamW {
-            lr: 0.001,
+            lr: 0.01,
             ..Default::default()
         },
     )?;
